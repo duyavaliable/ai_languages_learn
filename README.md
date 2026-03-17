@@ -15,7 +15,7 @@ A comprehensive language learning platform powered by AI, featuring personalized
 
 ### Backend
 - Node.js + Express
-- MongoDB + Mongoose
+- MySQL + Sequelize
 - OpenAI API
 - JWT Authentication
 
