@@ -8,6 +8,7 @@ router.get('/', protect, getLessons);
 router.get('/deleted', protect, authorize('admin'), getDeletedLessons);
 router.get('/:id', protect, getLessonById);
 router.post('/complete', protect, completeLesson);
+router.post('/teacher-create', protect, authorize('teacher'), createLesson);
 router.post('/', protect, authorize('admin'), createLesson);
 router.put('/:id', protect, authorize('admin'), updateLesson);
 router.delete('/:id', protect, authorize('admin'), deleteLesson);

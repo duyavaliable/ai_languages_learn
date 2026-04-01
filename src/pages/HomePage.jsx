@@ -2,21 +2,23 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
+
+
 function HomePage() {
   const navigate = useNavigate();
-  const [lessons, setLessons] = useState([]);
+  const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
   useEffect(() => {
-    api.get('/lessons')
+    api.get('/courses')
       .then(res => {
-        setLessons(res.data);
+        setCourses(res.data || []);
         setLoading(false);
       })
       .catch(err => {
-        setError('Không thể tải danh sách bài học');
+        setError('Không thể tải danh sách khóa học');
         setLoading(false);
         console.error(err);
       });
@@ -47,6 +49,11 @@ function HomePage() {
               📚 Quản lý nội dung
             </button>
           )}
+          {user.role === 'teacher' && (
+            <button onClick={() => navigate('/teacher/create-content')} style={styles.adminBtn}>
+              ✍️ Tạo course/lesson/exercise
+            </button>
+          )}
           <button onClick={handleLogout} style={styles.logoutBtn}>
             🚪 Đăng xuất
           </button>
@@ -55,22 +62,26 @@ function HomePage() {
 
       {/* Content */}
       <div style={styles.content}>
-        <h2 style={styles.sectionTitle}>📚 Danh sách bài học</h2>
-        <p style={styles.sectionDesc}>Chọn bài học để bắt đầu hành trình học ngôn ngữ của bạn</p>
+        <h2 style={styles.sectionTitle}>📚 Danh sách khóa học</h2>
+        <p style={styles.sectionDesc}>Chọn khóa học để vào trang kỹ năng nghe, nói, đọc, viết.</p>
 
         {loading && <p style={styles.statusText}>Đang tải...</p>}
         {error && <p style={styles.errorText}>{error}</p>}
-        {!loading && !error && lessons.length === 0 && (
-          <p style={styles.statusText}>Chưa có bài học nào.</p>
+        {!loading && !error && courses.length === 0 && (
+          <p style={styles.statusText}>Chưa có khóa học nào.</p>
         )}
 
         <div style={styles.lessonGrid}>
-          {lessons.map(lesson => (
-            <div key={lesson.id} style={styles.lessonCard}>
-              <div style={styles.lessonOrder}>Bài {lesson.lesson_order}</div>
-              <h3 style={styles.lessonTitle}>{lesson.title}</h3>
-              {lesson.content && (
-                <p style={styles.lessonContent}>{lesson.content.substring(0, 100)}...</p>
+          {courses.map(course => (
+            <div
+              key={course.id}
+              style={styles.lessonCard}
+              onClick={() => navigate(`/courses/${course.id}/skills`)}
+            >
+              <div style={styles.lessonOrder}>{String(course.level || 'Chưa có level').toUpperCase()}</div>
+              <h3 style={styles.lessonTitle}>{course.name}</h3>
+              {course.description && (
+                <p style={styles.lessonContent}>{course.description.substring(0, 140)}...</p>
               )}
             </div>
           ))}

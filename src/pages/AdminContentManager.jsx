@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
-const LEVELS = ['beginner', 'intermediate', 'advanced'];
+const LEVELS = ['A2', 'B1', 'B2', 'C1'];
 
 const emptyLesson = { course_id: '', title: '', content: '', lesson_order: 1 };
-const emptyCourse = { language_id: '', name: '', description: '', level: 'beginner', duration: '' };
+const emptyCourse = { language_id: '', name: '', description: '', level: 'A2', duration: '' };
 
 function AdminContentManager() {
   const navigate = useNavigate();

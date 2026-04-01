@@ -7,6 +7,9 @@ const Lesson = sequelize.define('Lesson', {
   title: { type: DataTypes.STRING(225), allowNull: false },
   content: { type: DataTypes.TEXT, allowNull: true },
   lesson_order: { type: DataTypes.INTEGER, allowNull: true, defaultValue: 1 },
+  skill_type: { type: DataTypes.STRING(32), allowNull: true },
+  cefr_level: { type: DataTypes.STRING(16), allowNull: true },
+  is_ai_exercise: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   is_deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }
 }, {
   tableName: 'lessons',

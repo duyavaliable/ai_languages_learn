@@ -6,6 +6,10 @@ import RegisterAdminPage from './pages/RegisterAdmin';
 import HomePage from './pages/HomePage';
 import AdminAccountManager from './pages/AdminAccountManager';
 import AdminContentManager from './pages/AdminContentManager';
+import TeacherCreateContent from './pages/TeacherCreateContent';
+import CourseSkillsPage from './pages/CourseSkillsPage';
+import SkillExercisesPage from './pages/SkillExercisesPage';
+import ExerciseAttemptPage from './pages/ExerciseAttemptPage';
 import PrivateRoute from './components/PrivateRoute';
 
 function App() {
@@ -38,6 +42,38 @@ function App() {
           element={
             <PrivateRoute>
               <AdminContentManager />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/teacher/create-content"
+          element={
+            <PrivateRoute>
+              <TeacherCreateContent />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/courses/:courseId/skills"
+          element={
+            <PrivateRoute>
+              <CourseSkillsPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/courses/:courseId/skills/:skill/exercises"
+          element={
+            <PrivateRoute>
+              <SkillExercisesPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/courses/:courseId/skills/:skill/exercises/:lessonId"
+          element={
+            <PrivateRoute>
+              <ExerciseAttemptPage />
             </PrivateRoute>
           }
         />
