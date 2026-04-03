@@ -41,6 +41,7 @@ function ExerciseAttemptPage() {
   const [editMode, setEditMode] = useState(false);
   const [editQuestions, setEditQuestions] = useState([]);
   const [savingQuestions, setSavingQuestions] = useState(false);
+  const [deletingExercise, setDeletingExercise] = useState(false);
   const [editFormData, setEditFormData] = useState({
     sampleAnswer: '',
     readingPassage: ''
@@ -55,8 +56,9 @@ function ExerciseAttemptPage() {
         setSecondsLeft(Number(res.data?.time_limit_sec) || Math.max(questionCount * 90, 300));
         setLoading(false);
       })
-      .catch(() => {
-        setError('Không tải được bài tập');
+      .catch((err) => {
+        const msg = err?.response?.data?.message || 'Không tải được bài tập';
+        setError(msg);
         setLoading(false);
       });
   }, [exerciseId]);
@@ -229,6 +231,30 @@ function ExerciseAttemptPage() {
     }
   };
 
+  const deleteCurrentExercise = async () => {
+    if (!isTeacherOrAdmin || !exerciseId || deletingExercise) return;
+
+    const role = String(currentUser?.role || '').toLowerCase();
+    const modeText = role === 'admin'
+      ? 'xoa cung (xoa vinh vien)'
+      : 'xoa mem (an bai khoi danh sach)';
+
+    const confirmed = window.confirm(`Ban chac chan muon ${modeText} bai nay?`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingExercise(true);
+      await api.delete(`/exercises/${exerciseId}`);
+      alert(role === 'admin' ? 'Da xoa cung bai tap.' : 'Da xoa mem bai tap.');
+      navigate(-1);
+    } catch (err) {
+      const apiMessage = err.response?.data?.message || err.message;
+      alert('Loi xoa bai: ' + apiMessage);
+    } finally {
+      setDeletingExercise(false);
+    }
+  };
+
   return (
     <div style={styles.wrapper}>
       <div style={styles.header}>
@@ -238,6 +264,15 @@ function ExerciseAttemptPage() {
           <p style={styles.subtitle}>Kỹ năng: {String(skill || '').toUpperCase()} {!editMode && `| Thời gian còn lại: ${formatTime(secondsLeft)}`}</p>
         </div>
         <div style={styles.headerBtnGroup}>
+          {isTeacherOrAdmin && (
+            <button
+              onClick={deleteCurrentExercise}
+              disabled={deletingExercise || savingQuestions}
+              style={styles.deleteBtn}
+            >
+              {deletingExercise ? 'Đang xóa...' : 'Xóa bài'}
+            </button>
+          )}
           {isTeacherOrAdmin && !editMode && (
             <button onClick={enterEditMode} style={styles.editModeBtn}>✏️ Chỉnh sửa</button>
           )}
@@ -316,7 +351,8 @@ function ExerciseAttemptPage() {
               )}
 
               {isWriting && (
-                <div style={styles.passageCard}>\n                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={styles.passageCard}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h3 style={styles.sectionTitle}>Đề bài viết</h3>
                     {isTeacherOrAdmin && editingField !== 'taskPrompt' && !editMode && (
                       <button onClick={() => startEdit('taskPrompt')} style={styles.editBtn}>✏️ Chỉnh sửa</button>
@@ -692,17 +728,12 @@ const styles = {
   label: { display: 'block', marginBottom: '6px', color: '#555', fontWeight: '600', fontSize: '13px' },
   headerBtnGroup: { display: 'flex', gap: '8px', alignItems: 'center' },
   editModeBtn: { border: '1px solid #1f7a8c', background: '#f8fbff', color: '#1f7a8c', padding: '10px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '14px' },
+  deleteBtn: { border: '1px solid #dc2626', background: '#fff5f5', color: '#b91c1c', padding: '10px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '14px' },
   cancelBtn: { border: '1px solid #cbd5e1', background: '#fff', color: '#475569', padding: '10px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '14px' },
   editQuestionBlock: { borderTop: '1px solid #e5e7eb', paddingTop: '14px', marginTop: '14px', padding: '14px', background: '#f9fafb', borderRadius: '8px' },
   editQuestionLabel: { marginTop: '10px', marginBottom: '6px', fontWeight: '600', color: '#333', fontSize: '13px' },
   editInput: { width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', lineHeight: 1.5, boxSizing: 'border-box', marginBottom: '8px' },
-  editSelect: { width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box', marginBottom: '8px' },
-  editModePanel: { background: '#fff', borderRadius: '12px', padding: '20px', border: '2px solid #2563eb', marginBottom: '14px' },
-  editModeHeader: { marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #e5e7eb' },
-  editModeNote: { margin: '8px 0 0 0', color: '#666', fontSize: '14px', fontStyle: 'italic' },
-  editSection: { marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #f0f0f0' },
-  editSectionTitle: { margin: '0 0 10px 0', color: '#0f172a', fontSize: '15px', fontWeight: '600' },
-  editNote: { margin: '8px 0 0 0', color: '#888', fontSize: '12px', fontStyle: 'italic', background: '#f9fafb', padding: '8px', borderRadius: '6px' }
+  editSelect: { width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box', marginBottom: '8px' }
 };
 
 export default ExerciseAttemptPage;

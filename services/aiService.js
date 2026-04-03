@@ -80,6 +80,14 @@ async function generateGeminiText({ systemInstruction, userPrompt, userParts = [
     finishReason: data?.candidates?.[0]?.finishReason || null
   });
 
+  if (data?.candidates?.[0]?.finishReason && String(data.candidates[0].finishReason).toUpperCase().includes('MAX_TOKENS')) {
+    console.warn('[Gemini] Output may be truncated due to token limit', {
+      finishReason: data.candidates[0].finishReason,
+      model: GEMINI_MODEL_TEXT,
+      maxOutputTokens
+    });
+  }
+
   if (!response.ok) {
     const apiMessage = data?.error?.message || `Gemini request failed with status ${response.status}`;
     console.error('[Gemini] generateContent failed', {
@@ -307,28 +315,143 @@ export const refineExerciseSet = async ({ skill, cefrLevel, feedback, currentExe
   if (!safeFeedback) {
     throw new Error('Feedback is required to refine exercise');
   }
+  const compactCurrent = {
+    title: String(currentExercise?.title || '').trim(),
+    skill: safeSkill,
+    cefrLevel: safeLevel,
+    topic: String(currentExercise?.topic || '').trim(),
+    readingPassage: String(currentExercise?.readingPassage || '').slice(0, 1600),
+    taskPrompt: String(currentExercise?.taskPrompt || '').slice(0, 600),
+    sampleAnswer: String(currentExercise?.sampleAnswer || '').slice(0, 600),
+    questions: Array.isArray(currentExercise?.questions)
+      ? currentExercise.questions.slice(0, 6).map((q) => ({
+          question: String(q?.question || ''),
+          options: Array.isArray(q?.options) ? q.options.slice(0, 4).map((o) => String(o || '')) : [],
+          correctAnswer: String(q?.correctAnswer || ''),
+          explanation: String(q?.explanation || '').slice(0, 160)
+        }))
+      : []
+  };
 
-  const aiText = await generateGeminiText({
-    systemInstruction: [
-      'You are an English assessment editor.',
-      'Revise the exercise according to teacher feedback while keeping the same CEFR level and skill.',
-      'Return strict JSON only with the same structure:',
-      'readingPassage, taskPrompt, sampleAnswer, questions.',
-      'Do not add markdown or extra commentary.'
-    ].join(' '),
-    userPrompt: [
-      `Skill: ${safeSkill}.`,
-      `CEFR Level: ${safeLevel}.`,
-      `Teacher feedback: ${safeFeedback}.`,
-      `Current exercise JSON: ${JSON.stringify(currentExercise || {})}`,
-      'Revise the exercise to match the feedback.'
-    ].join(' '),
-    temperature: 0.4,
-    maxOutputTokens: 2600,
-    forceJsonOutput: true
-  });
+  let aiText = '';
+  let parsedSet = null;
+  let lastErr = null;
+  const maxAttempts = 3;
 
-  const parsedSet = parseExerciseSetJson(aiText);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const isRetry = attempt > 1;
+    aiText = await generateGeminiText({
+      systemInstruction: [
+        'You are an English assessment editor.',
+        'Revise the exercise according to teacher feedback while keeping the same CEFR level and skill.',
+        'Return strict JSON only with the same structure:',
+        'readingPassage, taskPrompt, sampleAnswer, questions.',
+        'Do not add markdown or extra commentary.',
+        'Keep output compact and valid JSON. Do not end with dangling commas.'
+      ].join(' '),
+      userPrompt: [
+        `Skill: ${safeSkill}.`,
+        `CEFR Level: ${safeLevel}.`,
+        `Teacher feedback: ${safeFeedback}.`,
+        `Current exercise JSON: ${JSON.stringify(compactCurrent)}`,
+        isRetry ? 'Previous output was invalid/truncated JSON. Return a shorter but complete valid JSON object now.' : '',
+        'Revise the exercise to match the feedback.'
+      ].join(' '),
+      temperature: isRetry ? 0.25 : 0.4,
+      maxOutputTokens: 4096,
+      forceJsonOutput: true
+    });
+
+    try {
+      parsedSet = parseExerciseSetJson(aiText);
+      break;
+    } catch (err) {
+      lastErr = err;
+      console.warn('[refineExerciseSet] Parse failed, retrying if possible', {
+        attempt,
+        maxAttempts,
+        skill: safeSkill,
+        cefrLevel: safeLevel,
+        aiTextLength: aiText.length,
+        error: err?.message
+      });
+    }
+  }
+
+  if (!parsedSet) {
+    console.warn('[refineExerciseSet] Main refine failed after retries, trying compact patch fallback', {
+      skill: safeSkill,
+      cefrLevel: safeLevel,
+      feedbackPreview: safeFeedback.substring(0, 200),
+      aiTextLength: aiText.length,
+      aiTextPreview: aiText ? aiText.substring(0, 400) : '(empty)',
+      error: lastErr?.message
+    });
+
+    // Fallback: ask AI for a compact patch JSON (changed fields only), then merge.
+    let patchText = '';
+    let patchObj = null;
+    for (let patchAttempt = 1; patchAttempt <= 2; patchAttempt += 1) {
+      patchText = await generateGeminiText({
+        systemInstruction: [
+          'You revise exercises by returning compact JSON patch only.',
+          'Return strict JSON object only, no markdown.',
+          'Allowed keys: readingPassage, taskPrompt, sampleAnswer, questions.',
+          'Include only fields that need changes based on feedback.',
+          'Keep output short and valid JSON.'
+        ].join(' '),
+        userPrompt: [
+          `Skill: ${safeSkill}.`,
+          `CEFR Level: ${safeLevel}.`,
+          `Feedback: ${safeFeedback}.`,
+          `Current readingPassage: ${compactCurrent.readingPassage}`,
+          `Current taskPrompt: ${compactCurrent.taskPrompt}`,
+          `Current sampleAnswer: ${compactCurrent.sampleAnswer}`,
+          `Current questions: ${JSON.stringify(compactCurrent.questions).slice(0, 2400)}`,
+          'If feedback asks to make reading longer, return only readingPassage.',
+          'Return JSON object patch only.'
+        ].join(' '),
+        temperature: 0.2,
+        maxOutputTokens: 1800,
+        forceJsonOutput: true
+      });
+
+      try {
+        patchObj = parseJsonContent(patchText);
+        if (patchObj && typeof patchObj === 'object' && !Array.isArray(patchObj)) {
+          break;
+        }
+      } catch (patchErr) {
+        console.warn('[refineExerciseSet] Compact patch parse failed', {
+          patchAttempt,
+          error: patchErr?.message,
+          patchTextLength: patchText.length,
+          patchTextPreview: patchText.substring(0, 300)
+        });
+      }
+    }
+
+    if (!patchObj || typeof patchObj !== 'object' || Array.isArray(patchObj)) {
+      console.error('[refineExerciseSet] Compact patch fallback also failed', {
+        skill: safeSkill,
+        cefrLevel: safeLevel,
+        patchTextLength: patchText.length,
+        patchTextPreview: patchText ? patchText.substring(0, 400) : '(empty)',
+        lastError: lastErr?.message
+      });
+      throw lastErr || new Error('AI did not return valid JSON');
+    }
+
+    const merged = {
+      readingPassage: patchObj.readingPassage ?? compactCurrent.readingPassage,
+      taskPrompt: patchObj.taskPrompt ?? compactCurrent.taskPrompt,
+      sampleAnswer: patchObj.sampleAnswer ?? compactCurrent.sampleAnswer,
+      questions: Array.isArray(patchObj.questions) ? patchObj.questions : compactCurrent.questions
+    };
+
+    parsedSet = parseExerciseSetJson(JSON.stringify(merged));
+  }
+
   return {
     readingPassage: parsedSet.readingPassage,
     taskPrompt: parsedSet.taskPrompt,
@@ -366,6 +489,16 @@ function calculateSimilarity(str1, str2) {
   return (longer.length - editDistance) / longer.length;
 }
 
+function normalizeGeneratedText(value) {
+  const text = String(value ?? '');
+  return text
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/^\s*\\n+/, '')
+    .trim();
+}
+
 function parseExerciseJson(rawContent) {
   const content = String(rawContent || '').trim();
 
@@ -385,10 +518,10 @@ function parseExerciseJson(rawContent) {
   }
 
   return parsed.map((item) => ({
-    question: String(item?.question || '').trim(),
-    options: Array.isArray(item?.options) ? item.options.map((opt) => String(opt)) : [],
-    correctAnswer: String(item?.correctAnswer || '').trim(),
-    explanation: String(item?.explanation || '').trim()
+    question: normalizeGeneratedText(item?.question),
+    options: Array.isArray(item?.options) ? item.options.map((opt) => normalizeGeneratedText(opt)).filter(Boolean) : [],
+    correctAnswer: normalizeGeneratedText(item?.correctAnswer),
+    explanation: normalizeGeneratedText(item?.explanation)
   }));
 }
 
@@ -571,7 +704,7 @@ function parseExerciseSetJson(rawContent) {
   }
 
   const questions = parsed.questions.map((item, idx) => {
-    const options = Array.isArray(item?.options) ? item.options.map((opt) => String(opt || '').trim()).filter(Boolean) : [];
+    const options = Array.isArray(item?.options) ? item.options.map((opt) => normalizeGeneratedText(opt)).filter(Boolean) : [];
     
     // For reading/listening exercises, enforce 2+ options
     // For writing/speaking, questions array may be empty, so skip this check
@@ -579,7 +712,7 @@ function parseExerciseSetJson(rawContent) {
       throw new Error(`Question ${idx + 1} must have at least 2 options (has ${options.length})`);
     }
 
-    const correctAnswer = String(item?.correctAnswer || '').trim();
+    const correctAnswer = normalizeGeneratedText(item?.correctAnswer);
     let normalizedCorrect = correctAnswer;
     
     // Only try to match correctAnswer with options if options exist
@@ -588,17 +721,17 @@ function parseExerciseSetJson(rawContent) {
     }
 
     return {
-      question: String(item?.question || '').trim(),
+      question: normalizeGeneratedText(item?.question),
       options,
       correctAnswer: normalizedCorrect,
-      explanation: String(item?.explanation || '').trim()
+      explanation: normalizeGeneratedText(item?.explanation)
     };
   });
 
   return {
-    readingPassage: String(parsed.readingPassage || '').trim(),
-    taskPrompt: String(parsed.taskPrompt || '').trim(),
-    sampleAnswer: String(parsed.sampleAnswer || '').trim(),
+    readingPassage: normalizeGeneratedText(parsed.readingPassage),
+    taskPrompt: normalizeGeneratedText(parsed.taskPrompt),
+    sampleAnswer: normalizeGeneratedText(parsed.sampleAnswer),
     questions
   };
 }

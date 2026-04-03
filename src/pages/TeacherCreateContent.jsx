@@ -51,6 +51,7 @@ function TeacherCreateContent() {
   const [message, setMessage] = useState(null);
   const [createdExerciseInfo, setCreatedExerciseInfo] = useState(null);
   const [listeningAudioFile, setListeningAudioFile] = useState(null);
+  const [generateLoading, setGenerateLoading] = useState(false);
   const [editFeedback, setEditFeedback] = useState('');
   const [refineLoading, setRefineLoading] = useState(false);
 
@@ -104,6 +105,7 @@ function TeacherCreateContent() {
   const submitExercise = async (e) => {
     e.preventDefault();
     setMessage(null);
+    setGenerateLoading(true);
     try {
       const formData = new FormData();
       formData.append('course_id', String(Number(exerciseForm.course_id)));
@@ -156,6 +158,8 @@ function TeacherCreateContent() {
       } else {
         showMsg('error', 'Tạo exercise thất bại. Xem terminal để biết chi tiết lỗi.');
       }
+    } finally {
+      setGenerateLoading(false);
     }
   };
 
@@ -288,6 +292,12 @@ function TeacherCreateContent() {
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Tạo Exercise (AI)</h3>
             <p style={styles.hintText}>Giáo viên chọn khóa học, kỹ năng, trình độ và số câu. AI sẽ tạo bài tương ứng.</p>
+            {generateLoading && (
+              <div style={styles.loadingBanner}>
+                <span style={styles.loadingDot} />
+                AI đang tạo bài, vui lòng chờ...
+              </div>
+            )}
             <form onSubmit={submitExercise} style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr 1fr auto', gap: '12px', alignItems: 'end' }}>
               <div>
                 <label style={styles.label}>Khóa học</label>
@@ -363,9 +373,9 @@ function TeacherCreateContent() {
               <button
                 type="submit"
                 style={styles.submitBtn}
-                disabled={exerciseForm.skill === 'listening' && !listeningAudioFile}
+                disabled={generateLoading || (exerciseForm.skill === 'listening' && !listeningAudioFile)}
               >
-                Tạo bằng AI
+                {generateLoading ? 'Đang tạo...' : 'Tạo bằng AI'}
               </button>
             </form>
 
@@ -461,8 +471,8 @@ function TeacherCreateContent() {
                       onChange={(e) => setEditFeedback(e.target.value)}
                     />
                     <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-                      <button type="button" onClick={refineExercise} style={styles.submitBtn} disabled={refineLoading}>
-                        {refineLoading ? 'Đang chỉnh sửa...' : 'Chỉnh sửa bằng AI'}
+                      <button type="button" onClick={refineExercise} style={styles.submitBtn} disabled={refineLoading || generateLoading}>
+                        {refineLoading ? 'Đang chỉnh sửa...' : generateLoading ? 'Đang tạo bài...' : 'Chỉnh sửa bằng AI'}
                       </button>
                       <button type="button" onClick={resetExerciseDraft} style={styles.cancelBtn}>
                         Tạo bài mới
@@ -537,6 +547,24 @@ const styles = {
   },
   cardTitle: { marginTop: 0, marginBottom: '14px', color: '#234' },
   hintText: { marginTop: 0, marginBottom: '14px', color: '#4a5568', fontSize: '14px' },
+  loadingBanner: {
+    marginBottom: '12px',
+    padding: '10px 12px',
+    borderRadius: '8px',
+    border: '1px solid #bfdbfe',
+    background: '#eff6ff',
+    color: '#1e3a8a',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontWeight: '600'
+  },
+  loadingDot: {
+    width: '10px',
+    height: '10px',
+    borderRadius: '999px',
+    background: '#2563eb'
+  },
   label: { display: 'block', marginBottom: '6px', color: '#555', fontSize: '13px', fontWeight: '600' },
   input: {
     width: '100%',

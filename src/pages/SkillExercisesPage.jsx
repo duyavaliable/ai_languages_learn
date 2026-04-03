@@ -14,7 +14,7 @@ function SkillExercisesPage() {
   const { courseId, skill } = useParams();
 
   const [course, setCourse] = useState(null);
-  const [lessons, setLessons] = useState([]);
+  const [exercises, setExercises] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -23,9 +23,9 @@ function SkillExercisesPage() {
       api.get(`/courses/${courseId}`),
       api.get(`/exercises?courseId=${courseId}&skill=${skill}`)
     ])
-      .then(([courseRes, lessonsRes]) => {
+      .then(([courseRes, exercisesRes]) => {
         setCourse(courseRes.data);
-        setLessons(lessonsRes.data || []);
+        setExercises(exercisesRes.data || []);
         setLoading(false);
       })
       .catch(() => {
@@ -53,17 +53,17 @@ function SkillExercisesPage() {
               <div><strong>Kỹ năng:</strong> {SKILL_LABEL[skill] || skill}</div>
             </div>
 
-            {lessons.length === 0 && (
+            {exercises.length === 0 && (
               <p style={styles.statusText}>Chưa có bài tập nào cho kỹ năng này. Giáo viên có thể tạo trong mục Tạo Exercise (AI).</p>
             )}
 
-            {lessons.map((lesson, idx) => (
-              <div key={lesson.id} style={styles.exerciseCard}>
-                <h3 style={styles.question}>{idx + 1}. {lesson.title}</h3>
+            {exercises.map((exercise, idx) => (
+              <div key={exercise.id} style={styles.exerciseCard}>
+                <h3 style={styles.question}>{idx + 1}. {exercise.title}</h3>
                 <div style={styles.answer}>Nhấn làm bài để bắt đầu giao diện thi trắc nghiệm.</div>
                 <button
                   style={styles.startBtn}
-                  onClick={() => navigate(`/courses/${courseId}/skills/${skill}/exercises/${lesson.id}`)}
+                  onClick={() => navigate(`/courses/${courseId}/skills/${skill}/exercises/${exercise.id}`)}
                 >
                   Làm bài
                 </button>

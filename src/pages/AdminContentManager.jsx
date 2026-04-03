@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
 const LEVELS = ['A2', 'B1', 'B2', 'C1'];
+const SKILLS = ['reading', 'listening', 'writing', 'speaking'];
 
 const emptyLesson = { course_id: '', title: '', content: '', lesson_order: 1 };
 const emptyCourse = { language_id: '', name: '', description: '', level: 'A2', duration: '' };
@@ -38,6 +39,13 @@ function AdminContentManager() {
   const [showDeletedLessons, setShowDeletedLessons] = useState(false);
   const [deletedLessons, setDeletedLessons] = useState([]);
   const [deletedLessonLoading, setDeletedLessonLoading] = useState(false);
+
+  // ── Exercises ──
+  const [exercises, setExercises] = useState([]);
+  const [exerciseLoading, setExerciseLoading] = useState(false);
+  const [filterExerciseCourseId, setFilterExerciseCourseId] = useState('');
+  const [filterExerciseSkill, setFilterExerciseSkill] = useState('');
+  const [exerciseMsg, setExerciseMsg] = useState(null);
 
   useEffect(() => {
     if (currentUser.role !== 'admin') {
@@ -217,6 +225,56 @@ function AdminContentManager() {
     }
   };
 
+  // ── Exercise helpers ──
+  const fetchExercises = (courseId = filterExerciseCourseId, skill = filterExerciseSkill) => {
+    setExerciseLoading(true);
+    const params = new URLSearchParams();
+    if (courseId) params.set('courseId', courseId);
+    if (skill) params.set('skill', skill);
+    params.set('includeDeleted', 'true');
+    const query = params.toString() ? `?${params.toString()}` : '';
+
+    api.get(`/exercises${query}`)
+      .then((r) => {
+        setExercises(r.data || []);
+        setExerciseLoading(false);
+      })
+      .catch((err) => {
+        setExerciseMsg({ type: 'error', text: err.response?.data?.message || 'Không tải được danh sách exercise' });
+        setExerciseLoading(false);
+      });
+  };
+
+  const handleTabExercises = () => {
+    setTab('exercises');
+    setExerciseMsg(null);
+    fetchExercises(filterExerciseCourseId, filterExerciseSkill);
+  };
+
+  const handleDeleteExercise = async (id, title) => {
+    const target = exercises.find((item) => Number(item.id) === Number(id));
+    const isSoftDeleted = Boolean(target?.is_deleted);
+    const confirmText = isSoftDeleted
+      ? `Exercise "${title}" đã xóa mềm. Bạn muốn xóa cứng (vĩnh viễn)?`
+      : `Xóa mềm exercise "${title}"? Bạn có thể bấm xóa lần nữa để xóa cứng.`;
+
+    if (!window.confirm(confirmText)) return;
+
+    setExerciseMsg(null);
+    try {
+      const res = await api.delete(`/exercises/${id}`);
+      const mode = String(res?.data?.mode || '').toLowerCase();
+      if (mode === 'hard') {
+        setExerciseMsg({ type: 'success', text: `Đã xóa cứng exercise "${title}"` });
+      } else {
+        setExerciseMsg({ type: 'success', text: `Đã xóa mềm exercise "${title}"` });
+      }
+      fetchExercises(filterExerciseCourseId, filterExerciseSkill);
+    } catch (err) {
+      setExerciseMsg({ type: 'error', text: err.response?.data?.message || 'Xóa exercise thất bại' });
+    }
+  };
+
   const langName = (id) => languages.find(l => l.id === id)?.name ?? id;
   const courseName = (id) => courses.find(c => c.id === Number(id))?.name ?? id;
 
@@ -247,6 +305,12 @@ function AdminContentManager() {
             onClick={handleTabLesson}
           >
             📖 Bài học
+          </button>
+          <button
+            style={tab === 'exercises' ? styles.tabActive : styles.tab}
+            onClick={handleTabExercises}
+          >
+            🧪 Exercise
           </button>
         </div>
 
@@ -569,6 +633,94 @@ function AdminContentManager() {
             )}
           </div>
         )}
+
+        {/* ═══ EXERCISES TAB ═══ */}
+        {tab === 'exercises' && (
+          <div>
+            <div style={styles.topBar}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <h2 style={styles.sectionTitle}>Exercise ({exercises.length})</h2>
+                <select
+                  style={{ ...styles.input, width: '240px', margin: 0 }}
+                  value={filterExerciseCourseId}
+                  onChange={(e) => {
+                    const nextCourseId = e.target.value;
+                    setFilterExerciseCourseId(nextCourseId);
+                    fetchExercises(nextCourseId, filterExerciseSkill);
+                  }}
+                >
+                  <option value="">-- Tất cả khóa học --</option>
+                  {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select
+                  style={{ ...styles.input, width: '180px', margin: 0 }}
+                  value={filterExerciseSkill}
+                  onChange={(e) => {
+                    const nextSkill = e.target.value;
+                    setFilterExerciseSkill(nextSkill);
+                    fetchExercises(filterExerciseCourseId, nextSkill);
+                  }}
+                >
+                  <option value="">-- Tất cả kỹ năng --</option>
+                  {SKILLS.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {exerciseMsg && <Msg data={exerciseMsg} />}
+
+            {exerciseLoading && <p style={styles.statusText}>Đang tải...</p>}
+            {!exerciseLoading && (
+              <div style={styles.tableWrapper}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr style={styles.tableHeadRow}>
+                      <th style={styles.th}>STT</th>
+                      <th style={styles.th}>Tiêu đề</th>
+                      <th style={styles.th}>Khóa học</th>
+                      <th style={styles.th}>Kỹ năng</th>
+                      <th style={styles.th}>CEFR</th>
+                      <th style={styles.th}>Trạng thái</th>
+                      <th style={styles.th}>Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {exercises.map((e, idx) => (
+                      <tr key={e.id} style={styles.tableRow}>
+                        <td style={styles.td}>{idx + 1}</td>
+                        <td style={styles.td}><strong>{e.title}</strong></td>
+                        <td style={styles.td}>{courseName(e.course_id)}</td>
+                        <td style={styles.td}>{String(e.skill_type || '').toUpperCase()}</td>
+                        <td style={styles.td}>{String(e.cefr_level || '').toUpperCase()}</td>
+                        <td style={styles.td}>
+                          {e.is_deleted ? (
+                            <span style={styles.deletedBadge}>Đã xóa mềm</span>
+                          ) : (
+                            <span style={styles.activeBadge}>Đang hoạt động</span>
+                          )}
+                        </td>
+                        <td style={styles.td}>
+                          <div style={styles.actionGroup}>
+                            <button
+                              onClick={() => navigate(`/courses/${e.course_id}/skills/${e.skill_type}/exercises/${e.id}`)}
+                              style={styles.editBtn}
+                            >
+                              👁 Xem
+                            </button>
+                            <button onClick={() => handleDeleteExercise(e.id, e.title)} style={styles.deleteBtn}>🗑 {e.is_deleted ? 'Xóa cứng' : 'Xóa mềm'}</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {exercises.length === 0 && (
+                      <tr><td colSpan={7} style={styles.emptyCell}>Chưa có exercise nào.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -685,6 +837,14 @@ const styles = {
   restoreBtn: {
     background: '#f0fff4', color: '#276749', border: '1px solid #c6f6d5',
     padding: '5px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600'
+  },
+  activeBadge: {
+    background: '#ebf8ff', color: '#2b6cb0', border: '1px solid #bee3f8',
+    padding: '3px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '600'
+  },
+  deletedBadge: {
+    background: '#fff5f5', color: '#c53030', border: '1px solid #fed7d7',
+    padding: '3px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '600'
   },
   statusText: { color: '#888', textAlign: 'center', padding: '40px' }
 };
