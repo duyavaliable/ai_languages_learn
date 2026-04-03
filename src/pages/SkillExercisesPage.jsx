@@ -21,7 +21,7 @@ function SkillExercisesPage() {
   useEffect(() => {
     Promise.all([
       api.get(`/courses/${courseId}`),
-      api.get(`/lessons?courseId=${courseId}&skill=${skill}&exerciseOnly=true`)
+      api.get(`/exercises?courseId=${courseId}&skill=${skill}`)
     ])
       .then(([courseRes, lessonsRes]) => {
         setCourse(courseRes.data);

@@ -70,7 +70,7 @@ function App() {
           }
         />
         <Route
-          path="/courses/:courseId/skills/:skill/exercises/:lessonId"
+          path="/courses/:courseId/skills/:skill/exercises/:exerciseId"
           element={
             <PrivateRoute>
               <ExerciseAttemptPage />

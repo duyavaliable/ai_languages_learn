@@ -50,6 +50,9 @@ function TeacherCreateContent() {
 
   const [message, setMessage] = useState(null);
   const [createdExerciseInfo, setCreatedExerciseInfo] = useState(null);
+  const [listeningAudioFile, setListeningAudioFile] = useState(null);
+  const [editFeedback, setEditFeedback] = useState('');
+  const [refineLoading, setRefineLoading] = useState(false);
 
   useEffect(() => {
     if (currentUser.role !== 'teacher') {
@@ -92,9 +95,9 @@ function TeacherCreateContent() {
         lesson_order: Number(lessonForm.lesson_order || 1)
       });
       setLessonForm((prev) => ({ ...defaultLesson, course_id: prev.course_id }));
-      showMsg('success', 'Tạo lesson thành công');
+      showMsg('success', 'Tạo chủ đề thành công');
     } catch (err) {
-      showMsg('error', err.response?.data?.message || 'Tạo lesson thất bại');
+      showMsg('error', err.response?.data?.message || 'Tạo chủ đề thất bại');
     }
   };
 
@@ -102,29 +105,42 @@ function TeacherCreateContent() {
     e.preventDefault();
     setMessage(null);
     try {
-      const payload = {
-        course_id: Number(exerciseForm.course_id),
-        exerciseTitle: exerciseForm.title,
-        skill: exerciseForm.skill,
-        cefrLevel: exerciseForm.cefrLevel,
-        topic: exerciseForm.topic,
-        count: Number(exerciseForm.count || 5)
-      };
+      const formData = new FormData();
+      formData.append('course_id', String(Number(exerciseForm.course_id)));
+      formData.append('exerciseTitle', exerciseForm.title || '');
+      formData.append('skill', exerciseForm.skill);
+      formData.append('cefrLevel', exerciseForm.cefrLevel);
+      formData.append('topic', exerciseForm.topic || '');
+      formData.append('count', String(Number(exerciseForm.count || 5)));
 
-      const res = await api.post('/ai/teacher/generate-exercises', payload, {
+      if (exerciseForm.skill === 'listening') {
+        if (!listeningAudioFile) {
+          showMsg('error', 'Vui lòng tải file audio cho bài nghe.');
+          return;
+        }
+        formData.append('audioFile', listeningAudioFile);
+      }
+
+      const res = await api.post('/ai/teacher/generate-exercises', formData, {
         timeout: 90000
       });
       setCreatedExerciseInfo({
-        lessonId: res.data?.lessonId,
-        lessonTitle: res.data?.lessonTitle,
+        exerciseId: res.data?.exerciseId,
+        exerciseTitle: res.data?.exerciseTitle,
+        audioUrl: res.data?.audioUrl || null,
+        exerciseSet: res.data?.exerciseSet || null,
+        skill: exerciseForm.skill,
         questionCount: Array.isArray(res.data?.exerciseSet?.questions) ? res.data.exerciseSet.questions.length : 0
       });
-      showMsg('success', `AI đã tạo và lưu ${res.data?.savedLessons || 0} bài tập vào khóa học.`);
+      setListeningAudioFile(null);
+      setEditFeedback('');
+      showMsg('success', `AI đã tạo và lưu ${res.data?.savedExercises || 0} bài tập vào kho bài tập.`);
     } catch (err) {
       const detail = err?.response?.data?.message || err?.message || 'Tạo exercise thất bại';
       console.error('[TeacherCreateContent] Exercise generation failed', {
         request: {
           course_id: Number(exerciseForm.course_id),
+          exerciseTitle: exerciseForm.title,
           skill: exerciseForm.skill,
           cefrLevel: exerciseForm.cefrLevel,
           topic: exerciseForm.topic,
@@ -141,6 +157,42 @@ function TeacherCreateContent() {
         showMsg('error', 'Tạo exercise thất bại. Xem terminal để biết chi tiết lỗi.');
       }
     }
+  };
+
+  const refineExercise = async () => {
+    if (!createdExerciseInfo?.exerciseId) return;
+    if (!editFeedback.trim()) {
+      showMsg('error', 'Vui lòng nhập yêu cầu chỉnh sửa cho AI.');
+      return;
+    }
+
+    try {
+      setRefineLoading(true);
+      const res = await api.post('/ai/teacher/refine-exercise', {
+        exerciseId: createdExerciseInfo.exerciseId,
+        feedback: editFeedback
+      });
+
+      setCreatedExerciseInfo((prev) => ({
+        ...prev,
+        exerciseSet: res.data?.exerciseSet || prev?.exerciseSet,
+        exerciseTitle: res.data?.exerciseTitle || prev?.exerciseTitle,
+        questionCount: Array.isArray(res.data?.exerciseSet?.questions) ? res.data.exerciseSet.questions.length : prev?.questionCount
+      }));
+      setEditFeedback('');
+      showMsg('success', 'AI đã chỉnh sửa bài theo yêu cầu của giáo viên.');
+    } catch (err) {
+      showMsg('error', err.response?.data?.message || 'Không thể chỉnh sửa bài bằng AI');
+    } finally {
+      setRefineLoading(false);
+    }
+  };
+
+  const resetExerciseDraft = () => {
+    setCreatedExerciseInfo(null);
+    setEditFeedback('');
+    setListeningAudioFile(null);
+    setExerciseForm(defaultExercise);
   };
 
   return (
@@ -167,7 +219,7 @@ function TeacherCreateContent() {
             onClick={() => setMode('lesson')}
             style={mode === 'lesson' ? styles.modeBtnActive : styles.modeBtn}
           >
-            Tạo Lesson
+            Tạo Chủ đề từ vựng
           </button>
           <button
             onClick={() => setMode('exercise')}
@@ -210,7 +262,7 @@ function TeacherCreateContent() {
 
         {mode === 'lesson' && (
           <div style={styles.card}>
-            <h3 style={styles.cardTitle}>Tạo Lesson</h3>
+            <h3 style={styles.cardTitle}>Tạo Chủ đề từ vựng</h3>
             <form onSubmit={submitLesson}>
               <label style={styles.label}>Course</label>
               <select style={styles.input} value={lessonForm.course_id} onChange={(e) => setLessonForm((p) => ({ ...p, course_id: e.target.value }))} required>
@@ -218,7 +270,7 @@ function TeacherCreateContent() {
                 {courses.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
               </select>
 
-              <label style={styles.label}>Tên lesson</label>
+              <label style={styles.label}>Tên chủ đề</label>
               <input style={styles.input} value={lessonForm.title} onChange={(e) => setLessonForm((p) => ({ ...p, title: e.target.value }))} required />
 
               <label style={styles.label}>Thứ tự</label>
@@ -227,7 +279,7 @@ function TeacherCreateContent() {
               <label style={styles.label}>Nội dung</label>
               <textarea style={{ ...styles.input, height: '80px', resize: 'vertical' }} value={lessonForm.content} onChange={(e) => setLessonForm((p) => ({ ...p, content: e.target.value }))} />
 
-              <button type="submit" style={styles.submitBtn}>Tạo Lesson</button>
+              <button type="submit" style={styles.submitBtn}>Tạo Chủ đề</button>
             </form>
           </div>
         )}
@@ -264,7 +316,21 @@ function TeacherCreateContent() {
               </div>
               <div>
                 <label style={styles.label}>Kỹ năng</label>
-                <select style={styles.input} value={exerciseForm.skill} onChange={(e) => setExerciseForm((p) => ({ ...p, skill: e.target.value }))}>
+                <select
+                  style={styles.input}
+                  value={exerciseForm.skill}
+                  onChange={(e) => {
+                    const nextSkill = e.target.value;
+                    setExerciseForm((p) => ({
+                      ...p,
+                      skill: nextSkill,
+                      count: nextSkill === 'writing' || nextSkill === 'speaking' ? 0 : (p.count || 5)
+                    }));
+                    if (nextSkill !== 'listening') {
+                      setListeningAudioFile(null);
+                    }
+                  }}
+                >
                   {SKILL_OPTIONS.map((item) => (
                     <option key={item.value} value={item.value}>{item.label}</option>
                   ))}
@@ -284,9 +350,23 @@ function TeacherCreateContent() {
               </div>
               <div>
                 <label style={styles.label}>Số câu</label>
-                <input type="number" min="1" max="20" style={styles.input} value={exerciseForm.count} onChange={(e) => setExerciseForm((p) => ({ ...p, count: e.target.value }))} />
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  disabled={exerciseForm.skill === 'writing' || exerciseForm.skill === 'speaking'}
+                  style={styles.input}
+                  value={exerciseForm.count}
+                  onChange={(e) => setExerciseForm((p) => ({ ...p, count: e.target.value }))}
+                />
               </div>
-              <button type="submit" style={styles.submitBtn}>Tạo bằng AI</button>
+              <button
+                type="submit"
+                style={styles.submitBtn}
+                disabled={exerciseForm.skill === 'listening' && !listeningAudioFile}
+              >
+                Tạo bằng AI
+              </button>
             </form>
 
             <div style={{ marginTop: '8px' }}>
@@ -309,17 +389,88 @@ function TeacherCreateContent() {
               />
             </div>
 
+            {exerciseForm.skill === 'listening' && (
+              <div style={{ marginTop: '12px' }}>
+                <label style={styles.label}>File nghe (mp3, wav, m4a, webm, ogg)</label>
+                <input
+                  type="file"
+                  accept="audio/*"
+                  style={styles.input}
+                  onChange={(e) => setListeningAudioFile(e.target.files?.[0] || null)}
+                />
+                {listeningAudioFile && (
+                  <div style={styles.helperText}>Đã chọn: {listeningAudioFile.name}</div>
+                )}
+                {!listeningAudioFile && <div style={styles.helperText}>Bạn cần tải file audio để AI tạo bài nghe.</div>}
+              </div>
+            )}
+
             {createdExerciseInfo && (
               <div style={{ marginTop: '16px' }}>
                 <div style={styles.exerciseCard}>
-                  <div style={styles.exerciseQuestion}>Đã tạo: {createdExerciseInfo.lessonTitle}</div>
+                  <div style={styles.exerciseQuestion}>Đã tạo: {createdExerciseInfo.exerciseTitle}</div>
                   <div style={styles.answer}>Số câu: {createdExerciseInfo.questionCount}</div>
+                  {createdExerciseInfo.exerciseSet?.taskPrompt && (
+                    <div style={styles.previewBlock}>
+                      <strong>Đề bài:</strong>
+                      <div style={styles.previewText}>{createdExerciseInfo.exerciseSet.taskPrompt}</div>
+                    </div>
+                  )}
+                  {createdExerciseInfo.exerciseSet?.readingPassage && (
+                    <div style={styles.previewBlock}>
+                      <strong>Bài đọc:</strong>
+                      <div style={styles.previewText}>{createdExerciseInfo.exerciseSet.readingPassage}</div>
+                    </div>
+                  )}
+                  {createdExerciseInfo.audioUrl && (
+                    <div style={styles.previewBlock}>
+                      <strong>Audio:</strong>
+                      <audio controls style={{ width: '100%', marginTop: '8px' }} src={createdExerciseInfo.audioUrl} />
+                    </div>
+                  )}
+                  {Array.isArray(createdExerciseInfo.exerciseSet?.questions) && createdExerciseInfo.exerciseSet.questions.length > 0 && (
+                    <div style={styles.previewBlock}>
+                      <strong>Danh sách câu hỏi:</strong>
+                      {createdExerciseInfo.exerciseSet.questions.map((q, idx) => (
+                        <div key={idx} style={styles.questionPreviewCard}>
+                          <div style={styles.exerciseQuestion}>{idx + 1}. {q.question}</div>
+                          <div style={styles.optionPreviewGrid}>
+                            {(q.options || []).map((opt, i) => (
+                              <div key={i} style={styles.optionPreviewItem}>{String.fromCharCode(65 + i)}. {opt}</div>
+                            ))}
+                          </div>
+                          <div style={styles.answer}>Đáp án: {q.correctAnswer}</div>
+                          {q.explanation && <div style={styles.explainText}>Gợi ý: {q.explanation}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {createdExerciseInfo.exerciseSet?.sampleAnswer && (
+                    <div style={styles.previewBlock}>
+                      <strong>Bài mẫu:</strong>
+                      <div style={styles.previewText}>{createdExerciseInfo.exerciseSet.sampleAnswer}</div>
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: '14px' }}>
+                    <label style={styles.label}>Khung chat chỉnh sửa với AI</label>
+                    <textarea
+                      style={{ ...styles.input, height: '90px', resize: 'vertical' }}
+                      placeholder="Ví dụ: Hãy làm câu 2 dễ hơn, thêm 1 câu hỏi, đổi từ vựng sang chủ đề technology..."
+                      value={editFeedback}
+                      onChange={(e) => setEditFeedback(e.target.value)}
+                    />
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                      <button type="button" onClick={refineExercise} style={styles.submitBtn} disabled={refineLoading}>
+                        {refineLoading ? 'Đang chỉnh sửa...' : 'Chỉnh sửa bằng AI'}
+                      </button>
+                      <button type="button" onClick={resetExerciseDraft} style={styles.cancelBtn}>
+                        Tạo bài mới
+                      </button>
+                    </div>
+                  </div>
                   <div style={{ marginTop: '10px' }}>
-                    <button
-                      type="button"
-                      style={styles.submitBtn}
-                      onClick={() => navigate(`/courses/${exerciseForm.course_id}/skills/${exerciseForm.skill}/exercises`)}
-                    >
+                    <button type="button" style={styles.secondaryPreviewBtn} onClick={() => navigate(`/courses/${exerciseForm.course_id}/skills/${exerciseForm.skill}/exercises`)}>
                       Xem danh sách bài
                     </button>
                   </div>
@@ -431,7 +582,46 @@ const styles = {
   },
   exerciseQuestion: { fontWeight: '600', color: '#2d3748' },
   options: { margin: '8px 0', paddingLeft: '20px', color: '#4a5568' },
-  answer: { color: '#1f7a8c', fontWeight: '600' }
+  answer: { color: '#1f7a8c', fontWeight: '600' },
+  previewBlock: {
+    marginTop: '12px',
+    padding: '10px 12px',
+    borderRadius: '8px',
+    border: '1px solid #dbeafe',
+    background: '#f8fbff'
+  },
+  previewText: { whiteSpace: 'pre-wrap', color: '#334155', marginTop: '6px', lineHeight: 1.5 },
+  questionPreviewCard: {
+    marginTop: '10px',
+    padding: '10px',
+    borderRadius: '8px',
+    border: '1px solid #e2e8f0',
+    background: '#fff'
+  },
+  optionPreviewGrid: { display: 'grid', gap: '6px', marginTop: '8px' },
+  optionPreviewItem: { padding: '8px 10px', borderRadius: '6px', background: '#f8fafc', border: '1px solid #e2e8f0', color: '#334155' },
+  explainText: { marginTop: '8px', color: '#0f766e', fontStyle: 'italic' },
+  helperText: { color: '#b45309', marginTop: '8px', fontSize: '13px' },
+  secondaryPreviewBtn: {
+    border: '1px solid #1f7a8c',
+    background: '#f8fbff',
+    color: '#1f7a8c',
+    padding: '10px 16px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: '600',
+    fontSize: '14px'
+  },
+  cancelBtn: {
+    border: '1px solid #cbd5e1',
+    background: '#fff',
+    color: '#334155',
+    padding: '10px 16px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: '600',
+    fontSize: '14px'
+  }
 };
 
 export default TeacherCreateContent;
