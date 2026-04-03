@@ -37,3 +37,8 @@ coverage/
 *.sqlite
 *.sqlite3
 tmp/
+
+# uploads/audio: ignore all generated audio files
+uploads/audio/*
+!uploads/audio/.gitkeep
+!uploads/audio/.gitignore
