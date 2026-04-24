@@ -4,7 +4,7 @@ const HARDCODED_GEMINI_API_KEY = '';
 
 // Option 2: keep key in .env (recommended for security).
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL_TEXT = 'gemini-2.5-flash';
+const GEMINI_MODEL_TEXT = 'gemini-2.5-flash-lite';
 
 const getGeminiListModelsEndpoint = () =>
   `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(GEMINI_API_KEY)}`;
@@ -477,6 +477,65 @@ export const checkPronunciation = async (audioData, text, language) => {
   } catch (error) {
     throw new Error('Failed to evaluate pronunciation: ' + error.message);
   }
+};
+
+export const validateVocabularyColumnsWithAI = async (items = []) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return {
+      items: [],
+      warnings: []
+    };
+  }
+
+  if (items.length > 150) {
+    return {
+      items,
+      warnings: ['Skipped AI validation because row count is too high (>150).']
+    };
+  }
+
+  const aiText = await generateGeminiText({
+    systemInstruction: [
+      'You are a strict data normalization assistant for vocabulary tables.',
+      'Input rows may have column shifts between word, pronunciation, and Vietnamese meaning.',
+      'Return JSON array only, keep same number of rows and same order as input.',
+      'Each row must include: word, pronunciation, meaning.',
+      'Do not translate or invent content when missing data.',
+      'If uncertain, keep original values.'
+    ].join(' '),
+    userPrompt: [
+      'Normalize these rows into columns:',
+      JSON.stringify(items.map((item) => ({
+        word: String(item?.word || ''),
+        pronunciation: String(item?.pronunciation || ''),
+        meaning: String(item?.meaning || '')
+      }))),
+      'Return strict JSON array only. No markdown.'
+    ].join('\n'),
+    temperature: 0.1,
+    maxOutputTokens: 4096,
+    forceJsonOutput: true
+  });
+
+  const parsed = parseJsonContent(aiText);
+  if (!Array.isArray(parsed)) {
+    throw new Error('AI validation response must be an array');
+  }
+
+  const normalized = items.map((original, index) => {
+    const candidate = parsed[index] || {};
+    return {
+      ...original,
+      word: normalizeGeneratedText(candidate?.word || original?.word),
+      pronunciation: normalizeGeneratedText(candidate?.pronunciation || original?.pronunciation),
+      meaning: normalizeGeneratedText(candidate?.meaning || original?.meaning)
+    };
+  });
+
+  return {
+    items: normalized,
+    warnings: []
+  };
 };
 
 function calculateSimilarity(str1, str2) {

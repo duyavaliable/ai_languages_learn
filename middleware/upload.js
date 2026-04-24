@@ -26,4 +26,41 @@ const uploadAudio = multer({
   }
 });
 
+const allowedVocabularyTypes = new Set([
+  'application/pdf',
+  'application/x-pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/msword',
+  'application/octet-stream',
+  'text/plain'
+]);
+
+function isAllowedVocabularyFile(file) {
+  const mimetype = String(file?.mimetype || '').toLowerCase();
+  const name = String(file?.originalname || '').toLowerCase();
+
+  if (allowedVocabularyTypes.has(mimetype)) {
+    if (mimetype === 'application/octet-stream') {
+      return /\.(pdf|docx|txt)$/i.test(name);
+    }
+    return true;
+  }
+
+  return /\.(pdf|docx|txt)$/i.test(name);
+}
+
+const uploadVocabulary = multer({
+  storage,
+  limits: {
+    fileSize: 20 * 1024 * 1024
+  },
+  fileFilter: (_req, file, cb) => {
+    if (!isAllowedVocabularyFile(file)) {
+      return cb(new Error('Only PDF, DOCX or TXT files are allowed for vocabulary upload'));
+    }
+    cb(null, true);
+  }
+});
+
 export default uploadAudio;
+export { uploadVocabulary };

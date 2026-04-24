@@ -27,11 +27,22 @@ const defaultLesson = {
 
 const defaultExercise = {
   course_id: '',
+  lesson_id: '',
   title: '',
   skill: 'reading',
   cefrLevel: 'A2',
   topic: '',
   count: 5
+};
+
+const defaultVocabulary = {
+  course_id: '',
+  lesson_id: '',
+  word: '',
+  pronunciation: '',
+  meaning: '',
+  example_sentence: '',
+  example_translation: ''
 };
 
 const toCefrLevel = (value) => String(value || '').trim().toUpperCase();
@@ -43,10 +54,21 @@ function TeacherCreateContent() {
 
   const [languages, setLanguages] = useState([]);
   const [courses, setCourses] = useState([]);
+  const [exerciseLessons, setExerciseLessons] = useState([]);
+  const [vocabularyLessons, setVocabularyLessons] = useState([]);
+  const [vocabularies, setVocabularies] = useState([]);
+  const [vocabularyFile, setVocabularyFile] = useState(null);
+  const [vocabularyPreviewRows, setVocabularyPreviewRows] = useState([]);
+  const [vocabularyPreviewRaw, setVocabularyPreviewRaw] = useState('');
+  const [vocabularyParseMeta, setVocabularyParseMeta] = useState(null);
+  const [vocabularyUseAiValidation, setVocabularyUseAiValidation] = useState(false);
+  const [vocabularyPreviewLoading, setVocabularyPreviewLoading] = useState(false);
+  const [vocabularySaveLoading, setVocabularySaveLoading] = useState(false);
 
   const [courseForm, setCourseForm] = useState(defaultCourse);
   const [lessonForm, setLessonForm] = useState(defaultLesson);
   const [exerciseForm, setExerciseForm] = useState(defaultExercise);
+  const [vocabularyForm, setVocabularyForm] = useState(defaultVocabulary);
 
   const [message, setMessage] = useState(null);
   const [createdExerciseInfo, setCreatedExerciseInfo] = useState(null);
@@ -54,6 +76,12 @@ function TeacherCreateContent() {
   const [generateLoading, setGenerateLoading] = useState(false);
   const [editFeedback, setEditFeedback] = useState('');
   const [refineLoading, setRefineLoading] = useState(false);
+  const [exerciseLessonLoading, setExerciseLessonLoading] = useState(false);
+  const [vocabularyLessonLoading, setVocabularyLessonLoading] = useState(false);
+  const [vocabularyLoading, setVocabularyLoading] = useState(false);
+  const [vocabularyMsg, setVocabularyMsg] = useState(null);
+  const [vocabularyPreviewMsg, setVocabularyPreviewMsg] = useState(null);
+  const [editingVocabulary, setEditingVocabulary] = useState(null);
 
   useEffect(() => {
     if (currentUser.role !== 'teacher') {
@@ -69,7 +97,103 @@ function TeacherCreateContent() {
     api.get('/courses').then((res) => setCourses(res.data)).catch(() => {});
   };
 
+  const fetchLessonsForCourse = (courseId, setLessons, setLoading) => {
+    if (!courseId) {
+      setLessons([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    api.get(`/lessons?courseId=${courseId}`)
+      .then((res) => setLessons(res.data || []))
+      .catch(() => setLessons([]))
+      .finally(() => setLoading(false));
+  };
+
+  const fetchVocabulary = (lessonId) => {
+    if (!lessonId) {
+      setVocabularies([]);
+      setVocabularyLoading(false);
+      return;
+    }
+
+    setVocabularyLoading(true);
+    api.get(`/vocabulary?lessonId=${lessonId}`)
+      .then((res) => setVocabularies(res.data || []))
+      .catch(() => setVocabularies([]))
+      .finally(() => setVocabularyLoading(false));
+  };
+
+  const resetVocabularyPreview = () => {
+    setVocabularyFile(null);
+    setVocabularyPreviewRows([]);
+    setVocabularyPreviewRaw('');
+    setVocabularyParseMeta(null);
+    setVocabularyPreviewMsg(null);
+  };
+
+  const lessonLabel = (lesson) => {
+    if (!lesson) return '';
+    const prefix = lesson.lesson_order ? `Lesson ${lesson.lesson_order}` : 'Lesson';
+    return `${prefix}: ${lesson.title}`;
+  };
+
+  const syncExerciseLesson = (courseId, lessonId = '') => {
+    const courseLessons = exerciseLessons.length > 0 ? exerciseLessons : [];
+    const lesson = courseLessons.find((item) => String(item.id) === String(lessonId));
+    setExerciseForm((prev) => ({
+      ...prev,
+      course_id: courseId,
+      lesson_id: lessonId,
+      title: lesson ? lessonLabel(lesson) : '',
+      topic: lesson ? lesson.title : ''
+    }));
+  };
+
+  const syncVocabularyLesson = (courseId, lessonId = '') => {
+    setVocabularyForm((prev) => ({
+      ...prev,
+      course_id: courseId,
+      lesson_id: lessonId
+    }));
+  };
+
   const showMsg = (type, text) => setMessage({ type, text });
+
+  const isLikelyEnglishWord = (value) => {
+    const text = String(value || '').trim();
+    if (!text) return false;
+    const normalized = text
+      .replace(/[\u2018\u2019\u02BC]/g, "'")
+      .replace(/[\u2013\u2014]/g, '-');
+    return /^[A-Za-z][A-Za-z'\-\s]*$/.test(normalized);
+  };
+
+  const isLikelySuspiciousVocabularyRow = (item) => {
+    const word = String(item?.word || '').trim();
+    const meaning = String(item?.meaning || '').trim();
+    return !isLikelyEnglishWord(word) && Boolean(word || meaning);
+  };
+
+  const speakWord = (word) => {
+    const value = String(word || '').trim();
+    if (!value) return;
+    if (!isLikelyEnglishWord(value)) {
+      setVocabularyPreviewMsg({ type: 'error', text: 'Dòng này không giống từ tiếng Anh nên hệ thống không đọc để tránh phát âm sai.' });
+      return;
+    }
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      setVocabularyPreviewMsg({ type: 'error', text: 'Trình duyệt không hỗ trợ phát âm tự động.' });
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(value);
+    utterance.lang = 'en-US';
+    utterance.rate = 0.95;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  };
 
   const submitCourse = async (e) => {
     e.preventDefault();
@@ -91,11 +215,19 @@ function TeacherCreateContent() {
     e.preventDefault();
     setMessage(null);
     try {
+      const createdCourseId = lessonForm.course_id;
       await api.post('/lessons/teacher-create', {
         ...lessonForm,
         lesson_order: Number(lessonForm.lesson_order || 1)
       });
       setLessonForm((prev) => ({ ...defaultLesson, course_id: prev.course_id }));
+      fetchCourses();
+      if (String(exerciseForm.course_id) === String(createdCourseId)) {
+        fetchLessonsForCourse(createdCourseId, setExerciseLessons, setExerciseLessonLoading);
+      }
+      if (String(vocabularyForm.course_id) === String(createdCourseId)) {
+        fetchLessonsForCourse(createdCourseId, setVocabularyLessons, setVocabularyLessonLoading);
+      }
       showMsg('success', 'Tạo chủ đề thành công');
     } catch (err) {
       showMsg('error', err.response?.data?.message || 'Tạo chủ đề thất bại');
@@ -105,15 +237,24 @@ function TeacherCreateContent() {
   const submitExercise = async (e) => {
     e.preventDefault();
     setMessage(null);
+    const selectedLesson = exerciseLessons.find((lesson) => String(lesson.id) === String(exerciseForm.lesson_id));
+    if (!selectedLesson) {
+      showMsg('error', 'Vui lòng chọn lesson/chủ đề cho bài tập.');
+      return;
+    }
+
+    const exerciseTitle = lessonLabel(selectedLesson);
+    const exerciseTopic = selectedLesson.title;
     setGenerateLoading(true);
     try {
       const formData = new FormData();
       formData.append('course_id', String(Number(exerciseForm.course_id)));
-      formData.append('exerciseTitle', exerciseForm.title || '');
+      formData.append('exerciseTitle', exerciseTitle);
       formData.append('skill', exerciseForm.skill);
       formData.append('cefrLevel', exerciseForm.cefrLevel);
-      formData.append('topic', exerciseForm.topic || '');
+      formData.append('topic', exerciseTopic || '');
       formData.append('count', String(Number(exerciseForm.count || 5)));
+      formData.append('lesson_id', String(Number(exerciseForm.lesson_id)));
 
       if (exerciseForm.skill === 'listening') {
         if (!listeningAudioFile) {
@@ -142,10 +283,10 @@ function TeacherCreateContent() {
       console.error('[TeacherCreateContent] Exercise generation failed', {
         request: {
           course_id: Number(exerciseForm.course_id),
-          exerciseTitle: exerciseForm.title,
+          exerciseTitle,
           skill: exerciseForm.skill,
           cefrLevel: exerciseForm.cefrLevel,
-          topic: exerciseForm.topic,
+          topic: exerciseTopic,
           count: Number(exerciseForm.count || 5)
         },
         status: err?.response?.status,
@@ -199,6 +340,224 @@ function TeacherCreateContent() {
     setExerciseForm(defaultExercise);
   };
 
+  const handleExerciseCourseChange = (courseId) => {
+    const selectedCourse = courses.find((course) => String(course.id) === String(courseId));
+    const level = toCefrLevel(selectedCourse?.level);
+    setExerciseForm((prev) => ({
+      ...prev,
+      course_id: courseId,
+      lesson_id: '',
+      title: '',
+      topic: '',
+      cefrLevel: CEFR_LEVELS.includes(level) ? level : prev.cefrLevel
+    }));
+    setExerciseLessons([]);
+    fetchLessonsForCourse(courseId, setExerciseLessons, setExerciseLessonLoading);
+  };
+
+  const handleExerciseLessonChange = (lessonId) => {
+    const lesson = exerciseLessons.find((item) => String(item.id) === String(lessonId));
+    setExerciseForm((prev) => ({
+      ...prev,
+      lesson_id: lessonId,
+      title: lesson ? lessonLabel(lesson) : '',
+      topic: lesson ? lesson.title : ''
+    }));
+  };
+
+  const handleVocabularyCourseChange = (courseId) => {
+    setVocabularyForm((prev) => ({
+      ...prev,
+      course_id: courseId,
+      lesson_id: '',
+      word: '',
+      pronunciation: '',
+      meaning: '',
+      example_sentence: '',
+      example_translation: ''
+    }));
+    setVocabularyLessons([]);
+    setVocabularies([]);
+    resetVocabularyPreview();
+    fetchLessonsForCourse(courseId, setVocabularyLessons, setVocabularyLessonLoading);
+  };
+
+  const handleVocabularyLessonChange = (lessonId) => {
+    setVocabularyForm((prev) => ({
+      ...prev,
+      lesson_id: lessonId
+    }));
+    resetVocabularyPreview();
+    fetchVocabulary(lessonId);
+  };
+
+  const handleVocabularyFileChange = (file) => {
+    setVocabularyFile(file || null);
+    setVocabularyPreviewRows([]);
+    setVocabularyPreviewRaw('');
+    setVocabularyParseMeta(null);
+    setVocabularyPreviewMsg(null);
+  };
+
+  const previewVocabularyFile = async () => {
+    if (!vocabularyFile) {
+      setVocabularyPreviewMsg({ type: 'error', text: 'Vui lòng chọn file PDF, DOCX hoặc TXT.' });
+      return;
+    }
+
+    setVocabularyPreviewLoading(true);
+    setVocabularyPreviewMsg(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', vocabularyFile);
+      formData.append('validateWithAI', String(vocabularyUseAiValidation));
+      const res = await api.post('/vocabulary/preview', formData, {
+        timeout: 90000
+      });
+
+      setVocabularyPreviewRows(Array.isArray(res.data?.items) ? res.data.items : []);
+      setVocabularyPreviewRaw(res.data?.rawText || '');
+      setVocabularyParseMeta({
+        fileType: res.data?.fileType || 'unknown',
+        source: res.data?.source || 'unknown',
+        usedTable: Boolean(res.data?.usedTable),
+        totalRows: Number(res.data?.totalRows || 0),
+        aiValidationApplied: Boolean(res.data?.aiValidationApplied),
+        aiWarnings: Array.isArray(res.data?.aiWarnings) ? res.data.aiWarnings : []
+      });
+      setVocabularyPreviewMsg({
+        type: 'success',
+        text: `Đã quét ${res.data?.totalWords ?? res.data?.totalRows ?? 0} từ từ file. Hãy kiểm tra lại bảng preview trước khi lưu.`
+      });
+    } catch (err) {
+      setVocabularyPreviewMsg({ type: 'error', text: err.response?.data?.message || 'Không quét được file từ vựng' });
+    } finally {
+      setVocabularyPreviewLoading(false);
+    }
+  };
+
+  const updatePreviewRow = (index, field, value) => {
+    setVocabularyPreviewRows((prev) => prev.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, [field]: value } : item
+    )));
+  };
+
+  const removePreviewRow = (index) => {
+    setVocabularyPreviewRows((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const importPreviewVocabulary = async () => {
+    if (!vocabularyForm.lesson_id) {
+      setVocabularyPreviewMsg({ type: 'error', text: 'Vui lòng chọn lesson trước khi lưu.' });
+      return;
+    }
+
+    const normalizedItems = vocabularyPreviewRows
+      .map((item) => ({
+        word: String(item.word || '').trim(),
+        pronunciation: String(item.pronunciation || '').trim(),
+        meaning: String(item.meaning || '').trim(),
+        example_sentence: String(item.example_sentence || '').trim(),
+        example_translation: String(item.example_translation || '').trim()
+      }))
+      .filter((item) => item.word && item.meaning);
+
+    if (normalizedItems.length === 0) {
+      setVocabularyPreviewMsg({ type: 'error', text: 'Không có dòng hợp lệ để lưu.' });
+      return;
+    }
+
+    setVocabularySaveLoading(true);
+    try {
+      await api.post('/vocabulary/import-batch', {
+        lesson_id: Number(vocabularyForm.lesson_id),
+        items: normalizedItems
+      });
+
+      setVocabularyMsg({ type: 'success', text: `Đã lưu ${normalizedItems.length} từ vựng từ file.` });
+      setVocabularyPreviewMsg({ type: 'success', text: 'Lưu thành công. Bảng preview đã được làm mới.' });
+      resetVocabularyPreview();
+      fetchVocabulary(vocabularyForm.lesson_id);
+    } catch (err) {
+      setVocabularyPreviewMsg({ type: 'error', text: err.response?.data?.message || 'Lưu từ vựng từ file thất bại' });
+    } finally {
+      setVocabularySaveLoading(false);
+    }
+  };
+
+  const handleEditVocabulary = (item) => {
+    setEditingVocabulary(item.id);
+    const nextCourseId = item.lesson?.course_id ? String(item.lesson.course_id) : '';
+    const nextLessonId = item.lesson_id ? String(item.lesson_id) : '';
+    setVocabularyForm({
+      course_id: nextCourseId,
+      lesson_id: nextLessonId,
+      word: item.word || '',
+      pronunciation: item.pronunciation || '',
+      meaning: item.meaning || '',
+      example_sentence: item.example_sentence || '',
+      example_translation: item.example_translation || ''
+    });
+    setMode('vocabulary');
+    if (nextCourseId) {
+      fetchLessonsForCourse(nextCourseId, setVocabularyLessons, setVocabularyLessonLoading);
+    }
+    if (nextLessonId) {
+      fetchVocabulary(nextLessonId);
+    }
+  };
+
+  const resetVocabularyDraft = () => {
+    setEditingVocabulary(null);
+    setVocabularyForm((prev) => ({
+      ...defaultVocabulary,
+      course_id: prev.course_id,
+      lesson_id: prev.lesson_id
+    }));
+  };
+
+  const submitVocabulary = async (e) => {
+    e.preventDefault();
+    setVocabularyMsg(null);
+
+    if (!vocabularyForm.lesson_id || !vocabularyForm.word.trim() || !vocabularyForm.meaning.trim()) {
+      setVocabularyMsg({ type: 'error', text: 'Vui lòng chọn lesson và nhập từ + nghĩa.' });
+      return;
+    }
+
+    try {
+      const payload = {
+        lesson_id: Number(vocabularyForm.lesson_id),
+        word: vocabularyForm.word,
+        pronunciation: vocabularyForm.pronunciation,
+        meaning: vocabularyForm.meaning,
+        example_sentence: vocabularyForm.example_sentence,
+        example_translation: vocabularyForm.example_translation
+      };
+
+      if (editingVocabulary) {
+        await api.put(`/vocabulary/${editingVocabulary}`, payload);
+        setVocabularyMsg({ type: 'success', text: 'Cập nhật từ vựng thành công' });
+      } else {
+        await api.post('/vocabulary', payload);
+        setVocabularyMsg({ type: 'success', text: 'Tạo từ vựng thành công' });
+      }
+
+      fetchVocabulary(vocabularyForm.lesson_id);
+      setEditingVocabulary(null);
+      setVocabularyForm((prev) => ({
+        ...defaultVocabulary,
+        course_id: prev.course_id,
+        lesson_id: prev.lesson_id
+      }));
+    } catch (err) {
+      setVocabularyMsg({ type: 'error', text: err.response?.data?.message || 'Lưu từ vựng thất bại' });
+    }
+  };
+
+  const selectedExerciseLesson = exerciseLessons.find((lesson) => String(lesson.id) === String(exerciseForm.lesson_id));
+  const selectedVocabularyLesson = vocabularyLessons.find((lesson) => String(lesson.id) === String(vocabularyForm.lesson_id));
+
   return (
     <div style={styles.wrapper}>
       <div style={styles.header}>
@@ -223,7 +582,13 @@ function TeacherCreateContent() {
             onClick={() => setMode('lesson')}
             style={mode === 'lesson' ? styles.modeBtnActive : styles.modeBtn}
           >
-            Tạo Chủ đề từ vựng
+            Tạo Lesson
+          </button>
+          <button
+            onClick={() => setMode('vocabulary')}
+            style={mode === 'vocabulary' ? styles.modeBtnActive : styles.modeBtn}
+          >
+            Tạo Vocabulary
           </button>
           <button
             onClick={() => setMode('exercise')}
@@ -266,7 +631,7 @@ function TeacherCreateContent() {
 
         {mode === 'lesson' && (
           <div style={styles.card}>
-            <h3 style={styles.cardTitle}>Tạo Chủ đề từ vựng</h3>
+            <h3 style={styles.cardTitle}>Tạo Lesson / Chủ đề</h3>
             <form onSubmit={submitLesson}>
               <label style={styles.label}>Course</label>
               <select style={styles.input} value={lessonForm.course_id} onChange={(e) => setLessonForm((p) => ({ ...p, course_id: e.target.value }))} required>
@@ -274,7 +639,7 @@ function TeacherCreateContent() {
                 {courses.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
               </select>
 
-              <label style={styles.label}>Tên chủ đề</label>
+              <label style={styles.label}>Tên lesson / chủ đề</label>
               <input style={styles.input} value={lessonForm.title} onChange={(e) => setLessonForm((p) => ({ ...p, title: e.target.value }))} required />
 
               <label style={styles.label}>Thứ tự</label>
@@ -288,6 +653,241 @@ function TeacherCreateContent() {
           </div>
         )}
 
+        {mode === 'vocabulary' && (
+          <div style={styles.card}>
+            <h3 style={styles.cardTitle}>Tạo / cập nhật Vocabulary</h3>
+            <p style={styles.hintText}>Upload file PDF hoặc DOCX, hệ thống sẽ quét nội dung và cho bạn xem trước dưới dạng bảng.</p>
+
+            {vocabularyMsg && <div style={vocabularyMsg.type === 'success' ? styles.successBanner : styles.errorBanner}>{vocabularyMsg.text}</div>}
+            {vocabularyPreviewMsg && <div style={vocabularyPreviewMsg.type === 'success' ? styles.successBanner : styles.errorBanner}>{vocabularyPreviewMsg.text}</div>}
+            {vocabularyLessonLoading && <p style={styles.statusText}>Đang tải lesson...</p>}
+
+            <div style={styles.uploadBox}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={styles.label}>Course</label>
+                  <select
+                    style={styles.input}
+                    value={vocabularyForm.course_id}
+                    onChange={(e) => handleVocabularyCourseChange(e.target.value)}
+                    required
+                  >
+                    <option value="">-- Chọn course --</option>
+                    {courses.map((course) => (
+                      <option key={course.id} value={course.id}>{course.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={styles.label}>Lesson / chủ đề</label>
+                  <select
+                    style={styles.input}
+                    value={vocabularyForm.lesson_id}
+                    onChange={(e) => handleVocabularyLessonChange(e.target.value)}
+                    disabled={!vocabularyForm.course_id || vocabularyLessonLoading}
+                    required
+                  >
+                    <option value="">-- Chọn lesson --</option>
+                    {vocabularyLessons.map((lesson) => (
+                      <option key={lesson.id} value={lesson.id}>{lessonLabel(lesson)}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <label style={styles.label}>File từ vựng (PDF, DOCX, TXT)</label>
+              <input
+                type="file"
+                accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                style={styles.input}
+                onChange={(e) => handleVocabularyFileChange(e.target.files?.[0] || null)}
+              />
+              <label style={styles.checkboxLabel}>
+                <input
+                  type="checkbox"
+                  checked={vocabularyUseAiValidation}
+                  onChange={(e) => setVocabularyUseAiValidation(e.target.checked)}
+                />
+                <span>Dùng AI validation (tùy chọn) để rà soát cột English / Phiên âm / Nghĩa</span>
+              </label>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <button type="button" onClick={previewVocabularyFile} style={styles.submitBtn} disabled={vocabularyPreviewLoading || !vocabularyFile}>
+                  {vocabularyPreviewLoading ? 'Đang quét file...' : 'Quét & xem trước'}
+                </button>
+                <button type="button" onClick={resetVocabularyPreview} style={styles.cancelBtn}>
+                  Xóa preview
+                </button>
+              </div>
+            </div>
+
+            {vocabularyPreviewRows.length > 0 && (
+              <div style={{ marginTop: '18px' }}>
+                <h4 style={styles.subTitle}>Xem trước từ vựng</h4>
+                {vocabularyParseMeta && (
+                  <div style={styles.pipelineInfoBox}>
+                    <div>Loại file: <strong>{String(vocabularyParseMeta.fileType || '').toUpperCase()}</strong></div>
+                    <div>Nguồn parse: <strong>{vocabularyParseMeta.source === 'table' ? 'Table structure' : 'Raw text fallback'}</strong></div>
+                    <div>Bảng nhận diện: <strong>{vocabularyParseMeta.usedTable ? 'Có' : 'Không'}</strong> ({vocabularyParseMeta.totalRows} dòng)</div>
+                    <div>AI validation: <strong>{vocabularyParseMeta.aiValidationApplied ? 'Đã áp dụng' : 'Không áp dụng'}</strong></div>
+                    {vocabularyParseMeta.aiWarnings?.length > 0 && (
+                      <div style={{ marginTop: '6px', color: '#b45309' }}>
+                        {vocabularyParseMeta.aiWarnings.join(' | ')}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div style={styles.tableWrapper}>
+                  <table style={styles.table}>
+                    <thead>
+                      <tr style={styles.tableHeadRow}>
+                        <th style={styles.th}>STT</th>
+                        <th style={styles.th}>English</th>
+                        <th style={styles.th}>Phiên âm</th>
+                        <th style={styles.th}>Nghĩa tiếng Việt</th>
+                        <th style={styles.th}>Ví dụ</th>
+                        <th style={styles.th}>Nghe</th>
+                        <th style={styles.th}>Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vocabularyPreviewRows.map((item, idx) => (
+                        <tr key={`${item.word || 'row'}-${idx}`} style={styles.tableRow}>
+                          <td style={styles.td}>{idx + 1}</td>
+                          <td style={styles.td}>
+                            <input style={styles.tableInput} value={item.word || ''} onChange={(e) => updatePreviewRow(idx, 'word', e.target.value)} />
+                            {isLikelySuspiciousVocabularyRow(item) && <div style={styles.rowWarning}>Kiểm tra lại cột từ</div>}
+                          </td>
+                          <td style={styles.td}><input style={styles.tableInput} value={item.pronunciation || ''} onChange={(e) => updatePreviewRow(idx, 'pronunciation', e.target.value)} /></td>
+                          <td style={styles.td}><textarea style={styles.tableTextarea} value={item.meaning || ''} onChange={(e) => updatePreviewRow(idx, 'meaning', e.target.value)} /></td>
+                          <td style={styles.td}><textarea style={styles.tableTextarea} value={item.example_sentence || ''} onChange={(e) => updatePreviewRow(idx, 'example_sentence', e.target.value)} /></td>
+                          <td style={styles.td}>
+                            <button type="button" onClick={() => speakWord(item.word)} style={styles.secondaryBtn}>Nghe</button>
+                          </td>
+                          <td style={styles.td}>
+                            <button type="button" onClick={() => removePreviewRow(idx)} style={styles.dangerBtn}>Xóa</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div style={{ marginTop: '12px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <button type="button" style={styles.submitBtn} onClick={importPreviewVocabulary} disabled={vocabularySaveLoading}>
+                    {vocabularySaveLoading ? 'Đang lưu...' : 'Lưu toàn bộ vào lesson'}
+                  </button>
+                </div>
+
+                {vocabularyPreviewRaw && (
+                  <details style={{ marginTop: '14px' }}>
+                    <summary style={styles.previewSummary}>Xem text đã quét</summary>
+                    <pre style={styles.previewRawText}>{vocabularyPreviewRaw}</pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+            <div style={{ marginTop: '24px', borderTop: '1px solid #e2e8f0', paddingTop: '18px' }}>
+              <h4 style={styles.subTitle}>Nhập tay / sửa một từ</h4>
+              <form onSubmit={submitVocabulary}>
+                <label style={styles.label}>Từ vựng</label>
+                <input
+                  style={styles.input}
+                  value={vocabularyForm.word}
+                  onChange={(e) => setVocabularyForm((prev) => ({ ...prev, word: e.target.value }))}
+                  required
+                />
+
+                <label style={styles.label}>Phiên âm</label>
+                <input
+                  style={styles.input}
+                  value={vocabularyForm.pronunciation}
+                  onChange={(e) => setVocabularyForm((prev) => ({ ...prev, pronunciation: e.target.value }))}
+                />
+
+                <label style={styles.label}>Nghĩa</label>
+                <textarea
+                  style={{ ...styles.input, height: '72px', resize: 'vertical' }}
+                  value={vocabularyForm.meaning}
+                  onChange={(e) => setVocabularyForm((prev) => ({ ...prev, meaning: e.target.value }))}
+                  required
+                />
+
+                <label style={styles.label}>Ví dụ</label>
+                <textarea
+                  style={{ ...styles.input, height: '72px', resize: 'vertical' }}
+                  value={vocabularyForm.example_sentence}
+                  onChange={(e) => setVocabularyForm((prev) => ({ ...prev, example_sentence: e.target.value }))}
+                />
+
+                <label style={styles.label}>Dịch ví dụ</label>
+                <textarea
+                  style={{ ...styles.input, height: '72px', resize: 'vertical' }}
+                  value={vocabularyForm.example_translation}
+                  onChange={(e) => setVocabularyForm((prev) => ({ ...prev, example_translation: e.target.value }))}
+                />
+
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <button type="submit" style={styles.submitBtn}>
+                    {editingVocabulary ? 'Cập nhật từ vựng' : 'Tạo từ vựng'}
+                  </button>
+                  {editingVocabulary && (
+                    <button type="button" onClick={resetVocabularyDraft} style={styles.cancelBtn}>
+                      Hủy chỉnh sửa
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+
+            {vocabularyLoading && <p style={styles.statusText}>Đang tải danh sách từ vựng...</p>}
+            {!vocabularyLoading && selectedVocabularyLesson && (
+              <div style={{ marginTop: '20px' }}>
+                <h4 style={styles.subTitle}>Danh sách từ vựng - {lessonLabel(selectedVocabularyLesson)}</h4>
+                <div style={styles.tableWrapper}>
+                  <table style={styles.table}>
+                    <thead>
+                      <tr style={styles.tableHeadRow}>
+                        <th style={styles.th}>STT</th>
+                        <th style={styles.th}>Từ</th>
+                        <th style={styles.th}>Phiên âm</th>
+                        <th style={styles.th}>Nghĩa</th>
+                        <th style={styles.th}>Ví dụ</th>
+                        <th style={styles.th}>Nghe</th>
+                        <th style={styles.th}>Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vocabularies.map((item, idx) => (
+                        <tr key={item.id} style={styles.tableRow}>
+                          <td style={styles.td}>{idx + 1}</td>
+                          <td style={styles.td}><strong>{item.word}</strong></td>
+                          <td style={styles.td}>{item.pronunciation || '—'}</td>
+                          <td style={styles.td}>{item.meaning}</td>
+                          <td style={styles.td}>{item.example_sentence || '—'}</td>
+                          <td style={styles.td}>
+                            <button type="button" onClick={() => speakWord(item.word)} style={styles.secondaryBtn}>Nghe</button>
+                          </td>
+                          <td style={styles.td}>
+                            <div style={styles.actionGroup}>
+                              <button type="button" onClick={() => handleEditVocabulary(item)} style={styles.secondaryBtn}>Sửa</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {vocabularies.length === 0 && (
+                        <tr>
+                          <td colSpan={7} style={styles.emptyCell}>Chưa có từ vựng trong lesson này.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {mode === 'exercise' && (
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Tạo Exercise (AI)</h3>
@@ -298,22 +898,13 @@ function TeacherCreateContent() {
                 AI đang tạo bài, vui lòng chờ...
               </div>
             )}
-            <form onSubmit={submitExercise} style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr 1fr auto', gap: '12px', alignItems: 'end' }}>
+            <form onSubmit={submitExercise} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.3fr 1fr 1fr auto', gap: '12px', alignItems: 'end' }}>
               <div>
                 <label style={styles.label}>Khóa học</label>
                 <select
                   style={styles.input}
                   value={exerciseForm.course_id}
-                  onChange={(e) => {
-                    const courseId = e.target.value;
-                    const selectedCourse = courses.find((course) => String(course.id) === String(courseId));
-                    const level = toCefrLevel(selectedCourse?.level);
-                    setExerciseForm((p) => ({
-                      ...p,
-                      course_id: courseId,
-                      cefrLevel: CEFR_LEVELS.includes(level) ? level : p.cefrLevel
-                    }));
-                  }}
+                  onChange={(e) => handleExerciseCourseChange(e.target.value)}
                   required
                 >
                   <option value="">-- Chọn khóa --</option>
@@ -321,6 +912,22 @@ function TeacherCreateContent() {
                     <option key={course.id} value={course.id}>
                       {course.name} ({String(course.level || '').toUpperCase()})
                     </option>
+                  ))}
+                </select>
+                {exerciseLessonLoading && <div style={styles.helperText}>Đang tải lesson của khóa học...</div>}
+              </div>
+              <div>
+                <label style={styles.label}>Lesson / chủ đề</label>
+                <select
+                  style={styles.input}
+                  value={exerciseForm.lesson_id}
+                  onChange={(e) => handleExerciseLessonChange(e.target.value)}
+                  disabled={!exerciseForm.course_id || exerciseLessonLoading}
+                  required
+                >
+                  <option value="">-- Chọn lesson --</option>
+                  {exerciseLessons.map((lesson) => (
+                    <option key={lesson.id} value={lesson.id}>{lessonLabel(lesson)}</option>
                   ))}
                 </select>
               </div>
@@ -383,21 +990,15 @@ function TeacherCreateContent() {
               <label style={styles.label}>Tên bài</label>
               <input
                 style={styles.input}
-                placeholder="Ví dụ: Bài 1 - Reading Environment"
                 value={exerciseForm.title}
-                onChange={(e) => setExerciseForm((p) => ({ ...p, title: e.target.value }))}
+                readOnly
+                placeholder="Chọn lesson để tự động điền tên bài"
               />
             </div>
 
-            <div style={{ marginTop: '12px' }}>
-              <label style={styles.label}>Chủ đề phụ (không bắt buộc)</label>
-              <input
-                style={styles.input}
-                placeholder="Ví dụ: travel, business email, daily conversation..."
-                value={exerciseForm.topic}
-                onChange={(e) => setExerciseForm((p) => ({ ...p, topic: e.target.value }))}
-              />
-            </div>
+            {!selectedExerciseLesson && exerciseForm.course_id && (
+              <div style={styles.helperText}>Chọn lesson để hệ thống lấy tên bài và chủ đề từ database.</div>
+            )}
 
             {exerciseForm.skill === 'listening' && (
               <div style={{ marginTop: '12px' }}>
@@ -630,6 +1231,96 @@ const styles = {
   optionPreviewItem: { padding: '8px 10px', borderRadius: '6px', background: '#f8fafc', border: '1px solid #e2e8f0', color: '#334155' },
   explainText: { marginTop: '8px', color: '#0f766e', fontStyle: 'italic' },
   helperText: { color: '#b45309', marginTop: '8px', fontSize: '13px' },
+  checkboxLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    color: '#334155',
+    fontSize: '13px',
+    fontWeight: '600',
+    marginBottom: '12px'
+  },
+  uploadBox: {
+    marginTop: '12px',
+    padding: '14px',
+    borderRadius: '10px',
+    border: '1px solid #dbeafe',
+    background: '#f8fbff'
+  },
+  subTitle: { margin: '0 0 10px 0', color: '#234', fontSize: '16px' },
+  pipelineInfoBox: {
+    marginBottom: '12px',
+    padding: '10px 12px',
+    borderRadius: '8px',
+    border: '1px solid #bfdbfe',
+    background: '#eff6ff',
+    color: '#1e3a8a',
+    fontSize: '13px',
+    lineHeight: 1.6
+  },
+  tableWrapper: {
+    overflowX: 'auto',
+    border: '1px solid #e2e8f0',
+    borderRadius: '10px',
+    background: '#fff'
+  },
+  table: { width: '100%', borderCollapse: 'collapse' },
+  tableHeadRow: { background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: '#fff' },
+  th: { textAlign: 'left', padding: '12px 14px', fontSize: '14px', whiteSpace: 'nowrap' },
+  td: { padding: '12px 14px', borderTop: '1px solid #edf2f7', verticalAlign: 'top', fontSize: '14px', color: '#334155' },
+  tableRow: { background: '#fff' },
+  tableInput: {
+    width: '100%',
+    boxSizing: 'border-box',
+    border: '1px solid #cbd5e1',
+    borderRadius: '8px',
+    padding: '8px 10px',
+    fontSize: '13px'
+  },
+  tableTextarea: {
+    width: '100%',
+    minHeight: '68px',
+    boxSizing: 'border-box',
+    border: '1px solid #cbd5e1',
+    borderRadius: '8px',
+    padding: '8px 10px',
+    fontSize: '13px',
+    resize: 'vertical'
+  },
+  emptyCell: { padding: '18px', textAlign: 'center', color: '#667085' },
+  actionGroup: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
+  secondaryBtn: {
+    border: '1px solid #1f7a8c',
+    background: '#f8fbff',
+    color: '#1f7a8c',
+    padding: '8px 12px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: '600',
+    fontSize: '13px'
+  },
+  dangerBtn: {
+    border: '1px solid #fca5a5',
+    background: '#fff5f5',
+    color: '#b91c1c',
+    padding: '8px 12px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: '600',
+    fontSize: '13px'
+  },
+  rowWarning: { marginTop: '6px', color: '#b45309', fontSize: '12px', fontWeight: '600' },
+  previewSummary: { cursor: 'pointer', fontWeight: '600', color: '#1f7a8c' },
+  previewRawText: {
+    whiteSpace: 'pre-wrap',
+    background: '#f8fafc',
+    border: '1px solid #e2e8f0',
+    borderRadius: '8px',
+    padding: '12px',
+    marginTop: '8px',
+    color: '#334155',
+    overflowX: 'auto'
+  },
   secondaryPreviewBtn: {
     border: '1px solid #1f7a8c',
     background: '#f8fbff',
