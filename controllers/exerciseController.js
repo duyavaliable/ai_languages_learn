@@ -1,4 +1,5 @@
 import { Exercise, Course, Lesson } from '../models/index.js';
+import { parseExerciseParts } from '../services/exerciseImportService.js';
 
 const normalizeSkillType = (skill) => {
   if (!skill) return null;
@@ -167,5 +168,15 @@ export const deleteExercise = async (req, res) => {
     return res.status(403).json({ message: 'Forbidden: insufficient permissions' });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+};
+
+export const previewExerciseFile = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'File is required' });
+    const parsed = await parseExerciseParts(req.file);
+    return res.json({ fileType: parsed.fileType, parts: parsed.parts || [], rawText: parsed.rawText || '' });
+  } catch (error) {
+    return res.status(400).json({ message: error.message });
   }
 };

@@ -94,15 +94,33 @@ Trang `TeacherCreateContent` da duoc sua de giao vien:
 
 1. Chon khoa hoc (B1/B2/C1/A2).
 2. Chon ky nang (reading/listening/writing/speaking).
-3. Nhap so cau.
-4. (Tuy chon) Nhap chu de phu.
-5. Bam `Generate`.
+3. Tai file PDF/DOCX de quet PARTs.
+4. Chon mot hoac nhieu PART bang cac card hien thi.
+5. Bam `Tao ... bai` de tao mot bai rieng cho moi PART da chon.
 
 He thong se:
 - Tu dong lay CEFR level tu khoa hoc.
-- Dung prompt AI co san, khong can giao vien tu nhap yeu cau dai.
-- Tao bai tap dung ky nang + dung trinh do.
-- Luu bai tap vao `lessons` voi metadata ky nang/CEFR de hien thi tren trang nguoi hoc.
+- Dung prompt AI co san theo tung PART, khong can giao vien tu nhap prompt dai.
+- Tao mot exercise rieng cho moi PART da chon, de hien thi thanh nhieu card trong danh sach.
+- Luu bai tap voi metadata ky nang/CEFR de hien thi tren trang nguoi hoc.
+
+## OCR Support for Exercise Uploads
+
+Exercise file preview co ho tro PDF dang anh (scanned PDF) thong qua OCR.
+
+Can:
+
+1. Cai package JS:
+```bash
+npm install tesseract.js
+```
+
+2. Cai `pdftoppm` (Poppler) tren may/server:
+- Windows: `choco install poppler -y`
+- Ubuntu/Debian: `sudo apt install poppler-utils`
+- macOS: `brew install poppler`
+
+Neu thieu `pdftoppm`, he thong van co the preview neu file PDF co text san, nhung OCR cho PDF dang anh se khong chay.
 
 ## Prompt AI da duoc dong goi
 
