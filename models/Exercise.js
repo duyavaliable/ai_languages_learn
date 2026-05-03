@@ -7,7 +7,6 @@ const Exercise = sequelize.define('Exercise', {
   title: { type: DataTypes.STRING(225), allowNull: false },
   skill_type: { type: DataTypes.STRING(32), allowNull: false },
   cefr_level: { type: DataTypes.STRING(16), allowNull: false },
-  topic: { type: DataTypes.STRING(255), allowNull: true },
   reading_passage: { type: DataTypes.TEXT('long'), allowNull: true },
   task_prompt: { type: DataTypes.TEXT('long'), allowNull: true },
   sample_answer: { type: DataTypes.TEXT('long'), allowNull: true },

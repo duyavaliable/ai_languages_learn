@@ -27,12 +27,11 @@ export const generatePracticeExercises = async (req, res) => {
     exerciseTitle: req.body?.exerciseTitle,
     skill: req.body?.skill,
     cefrLevel: req.body?.cefrLevel,
-    count: req.body?.count,
-    topic: req.body?.topic
+    count: req.body?.count
   });
 
   try {
-    const { topic, difficulty, count, course_id, skill, cefrLevel, exerciseTitle } = req.body;
+    const { difficulty, count, course_id, skill, cefrLevel, exerciseTitle } = req.body;
 
     if (course_id || skill || cefrLevel) {
       const normalizedSkill = toSkill(skill);
@@ -79,7 +78,6 @@ export const generatePracticeExercises = async (req, res) => {
         skill: normalizedSkill,
         cefrLevel: normalizedLevel,
         count,
-        topic,
         audioInput: audioUpload
       });
 
@@ -90,7 +88,6 @@ export const generatePracticeExercises = async (req, res) => {
         type: 'ai_quiz',
         skill: normalizedSkill,
         cefrLevel: normalizedLevel,
-        topic: String(topic || '').trim(),
         readingPassage: exercises.readingPassage || '',
         taskPrompt: exercises.taskPrompt || '',
         sampleAnswer: exercises.sampleAnswer || '',
@@ -102,7 +99,6 @@ export const generatePracticeExercises = async (req, res) => {
         title: exerciseName,
         skill_type: normalizedSkill,
         cefr_level: normalizedLevel,
-        topic: String(topic || '').trim() || null,
         reading_passage: exerciseContent.readingPassage || null,
         task_prompt: exerciseContent.taskPrompt || null,
         sample_answer: exerciseContent.sampleAnswer || null,

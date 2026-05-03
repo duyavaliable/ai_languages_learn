@@ -21,7 +21,7 @@ function ensureGeminiConfigured() {
   }
 }
 
-async function generateGeminiText({ systemInstruction, userPrompt, userParts = [], temperature = 0.6, maxOutputTokens = 1024, forceJsonOutput = false }) {
+export async function generateGeminiText({ systemInstruction, userPrompt, userParts = [], temperature = 0.6, maxOutputTokens = 1024, forceJsonOutput = false }) {
   ensureGeminiConfigured();
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_TEXT}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;

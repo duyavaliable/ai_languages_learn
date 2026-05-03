@@ -31,7 +31,6 @@ const defaultExercise = {
   title: '',
   skill: 'reading',
   cefrLevel: 'A2',
-  topic: '',
   count: 5
 };
 
@@ -74,8 +73,6 @@ function TeacherCreateContent() {
   const [createdExerciseInfos, setCreatedExerciseInfos] = useState([]);
   const [listeningAudioFile, setListeningAudioFile] = useState(null);
   const [generateLoading, setGenerateLoading] = useState(false);
-  const [editFeedback, setEditFeedback] = useState('');
-  const [refineLoading, setRefineLoading] = useState(false);
   const [exerciseLessonLoading, setExerciseLessonLoading] = useState(false);
   const [exerciseFile, setExerciseFile] = useState(null);
   const [exerciseParts, setExerciseParts] = useState([]);
@@ -144,6 +141,51 @@ function TeacherCreateContent() {
     return `${prefix}: ${lesson.title}`;
   };
 
+  // Helper: Parse questions from raw text (same logic as backend)
+  const parseQuestionsFromText = (text) => {
+    if (!text) return [];
+    const lines = String(text).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const questions = [];
+    let i = 0;
+    while (i < lines.length) {
+      const qMatch = lines[i].match(/^\s*(\d+)\s*[\.)]\s*(.+)$/);
+      if (qMatch) {
+        const qTextParts = [qMatch[2] || ''];
+        const options = [];
+        let correctAnswer = null;
+        i += 1;
+        let optionLetter = 'A';
+        while (i < lines.length) {
+          const optMatch = lines[i].match(/^\s*(\(?\s*([A-Da-d])\s*\)?\.?\)?)\s*(.+)$/);
+          if (optMatch) {
+            const optText = String(optMatch[3] || '').trim();
+            const fullLine = lines[i].trim();
+            const isMarkedCorrect = /^\(\s*[A-Da-d]\s*\.?\s*\)/.test(fullLine);
+            if (isMarkedCorrect) {
+              correctAnswer = optText;
+            }
+            options.push(optText);
+            optionLetter = String.fromCharCode(optionLetter.charCodeAt(0) + 1);
+            i += 1;
+            continue;
+          }
+          const nextQMatch = lines[i].match(/^\s*\d+\s*[\.)]\s*/);
+          if (nextQMatch) break;
+          if (options.length === 0) {
+            qTextParts.push(lines[i]);
+            i += 1;
+            continue;
+          }
+          break;
+        }
+        questions.push({ question: qTextParts.join(' ').trim(), options, correctAnswer });
+        continue;
+      }
+      i += 1;
+    }
+    return questions;
+  };
+
   const syncExerciseLesson = (courseId, lessonId = '') => {
     const courseLessons = exerciseLessons.length > 0 ? exerciseLessons : [];
     const lesson = courseLessons.find((item) => String(item.id) === String(lessonId));
@@ -151,8 +193,7 @@ function TeacherCreateContent() {
       ...prev,
       course_id: courseId,
       lesson_id: lessonId,
-      title: lesson ? lessonLabel(lesson) : '',
-      topic: lesson ? lesson.title : ''
+      title: lesson ? lessonLabel(lesson) : ''
     }));
   };
 
@@ -262,13 +303,18 @@ function TeacherCreateContent() {
         : [];
 
       if (selectedParts.length === 0) {
+        showMsg('error', 'AI tạo bài đã bị tắt. Vui lòng chọn PART hoặc tải lên file chứa PART để tạo bài.');
+        setGenerateLoading(false);
+        return;
+      } else {
+        // Create exercises directly from selected PARTs (no AI generation)
+        const partsPayload = selectedParts.map((p) => ({ title: p.part.title || '', content: p.part.content || '' }));
         const formData = new FormData();
         formData.append('course_id', String(Number(exerciseForm.course_id)));
         formData.append('exerciseTitle', manualTitle);
         formData.append('skill', exerciseForm.skill);
         formData.append('cefrLevel', exerciseForm.cefrLevel);
-        formData.append('topic', String(exerciseForm.topic || '').trim());
-        formData.append('count', String(Number(exerciseForm.count || 5)));
+        formData.append('parts', JSON.stringify(partsPayload));
 
         if (exerciseForm.skill === 'listening') {
           if (!listeningAudioFile) {
@@ -278,55 +324,31 @@ function TeacherCreateContent() {
           formData.append('audioFile', listeningAudioFile);
         }
 
-        const res = await api.post('/ai/teacher/generate-exercises', formData, {
-          timeout: 90000
+        const res = await api.post('/exercises/create-from-parts', formData, {
+          timeout: 60000
         });
 
-        createdItems.push({
-          exerciseId: res.data?.exerciseId,
-          exerciseTitle: res.data?.exerciseTitle || manualTitle,
-          audioUrl: res.data?.audioUrl || null,
-          exerciseSet: res.data?.exerciseSet || null,
-          skill: exerciseForm.skill,
-          questionCount: Array.isArray(res.data?.exerciseSet?.questions) ? res.data.exerciseSet.questions.length : 0
-        });
-      } else {
-        for (const { part } of selectedParts) {
-          const formData = new FormData();
-          formData.append('course_id', String(Number(exerciseForm.course_id)));
-          formData.append('exerciseTitle', manualTitle);
-          formData.append('skill', exerciseForm.skill);
-          formData.append('cefrLevel', exerciseForm.cefrLevel);
-          formData.append('topic', String(part.content || part.title || '').trim());
-          formData.append('count', String(Number(exerciseForm.count || 5)));
-
-          if (exerciseForm.skill === 'listening') {
-            if (!listeningAudioFile) {
-              showMsg('error', 'Vui lòng tải file audio cho bài nghe.');
-              return;
-            }
-            formData.append('audioFile', listeningAudioFile);
+        if (res.data?.created) {
+          for (const c of res.data.created) {
+            createdItems.push({
+              exerciseId: c.exerciseId,
+              exerciseTitle: c.exerciseTitle,
+              audioUrl: null,
+              exerciseSet: {
+                readingPassage: c.readingPassage,
+                taskPrompt: c.taskPrompt,
+                questions: Array.isArray(c.questions) ? c.questions : []
+              },
+              skill: exerciseForm.skill,
+              questionCount: Array.isArray(c.questions) ? c.questions.length : 0
+            });
           }
-
-          const res = await api.post('/ai/teacher/generate-exercises', formData, {
-            timeout: 90000
-          });
-
-          createdItems.push({
-            exerciseId: res.data?.exerciseId,
-            exerciseTitle: res.data?.exerciseTitle || manualTitle,
-            audioUrl: res.data?.audioUrl || null,
-            exerciseSet: res.data?.exerciseSet || null,
-            skill: exerciseForm.skill,
-            questionCount: Array.isArray(res.data?.exerciseSet?.questions) ? res.data.exerciseSet.questions.length : 0
-          });
         }
       }
 
       setCreatedExerciseInfos(createdItems);
       setListeningAudioFile(null);
-      setEditFeedback('');
-      showMsg('success', `AI đã tạo và lưu ${createdItems.length} bài tập vào kho bài tập.`);
+      showMsg('success', `Đã tạo và lưu ${createdItems.length} bài tập vào kho bài tập.`);
     } catch (err) {
       const detail = err?.response?.data?.message || err?.message || 'Tạo exercise thất bại';
       console.error('[TeacherCreateContent] Exercise generation failed', {
@@ -334,7 +356,6 @@ function TeacherCreateContent() {
           course_id: Number(exerciseForm.course_id),
           skill: exerciseForm.skill,
           cefrLevel: exerciseForm.cefrLevel,
-          topic: exerciseParts.map((part) => part.title).join(', '),
           count: Number(exerciseForm.count || 5)
         },
         status: err?.response?.status,
@@ -352,41 +373,11 @@ function TeacherCreateContent() {
     }
   };
 
-  const refineExercise = async () => {
-    const currentExercise = createdExerciseInfos[0];
-    if (!currentExercise?.exerciseId) return;
-    if (!editFeedback.trim()) {
-      showMsg('error', 'Vui lòng nhập yêu cầu chỉnh sửa cho AI.');
-      return;
-    }
-
-    try {
-      setRefineLoading(true);
-      const res = await api.post('/ai/teacher/refine-exercise', {
-        exerciseId: currentExercise.exerciseId,
-        feedback: editFeedback
-      });
-
-      setCreatedExerciseInfos((prev) => prev.map((item, index) => (
-        index === 0 ? {
-          ...item,
-          exerciseSet: res.data?.exerciseSet || item?.exerciseSet,
-          exerciseTitle: res.data?.exerciseTitle || item?.exerciseTitle,
-          questionCount: Array.isArray(res.data?.exerciseSet?.questions) ? res.data.exerciseSet.questions.length : item?.questionCount
-        } : item
-      )));
-      setEditFeedback('');
-      showMsg('success', 'AI đã chỉnh sửa bài theo yêu cầu của giáo viên.');
-    } catch (err) {
-      showMsg('error', err.response?.data?.message || 'Không thể chỉnh sửa bài bằng AI');
-    } finally {
-      setRefineLoading(false);
-    }
-  };
+  // AI refine functionality removed.
 
   const resetExerciseDraft = () => {
     setCreatedExerciseInfos([]);
-    setEditFeedback('');
+    // reset
     setListeningAudioFile(null);
     setExerciseForm(defaultExercise);
     setExerciseFile(null);
@@ -401,7 +392,6 @@ function TeacherCreateContent() {
       ...prev,
       course_id: courseId,
       title: '',
-      topic: '',
       cefrLevel: CEFR_LEVELS.includes(level) ? level : prev.cefrLevel
     }));
   };
@@ -455,14 +445,15 @@ function TeacherCreateContent() {
     try {
       const formData = new FormData();
       formData.append('file', exerciseFile);
+      formData.append('skill', exerciseForm.skill);
       const res = await api.post('/exercises/preview-parts', formData, { timeout: 90000 });
       const parts = Array.isArray(res.data?.parts) ? res.data.parts : [];
       setExerciseParts(parts);
       setExerciseSelectedParts(parts.map((_part, index) => index));
       if (parts.length === 0) {
-        showMsg('info', 'Không tìm thấy phần (PART) trong tài liệu.');
+        showMsg('info', 'Không tìm thấy phần nội dung phù hợp trong tài liệu.');
       } else {
-        showMsg('success', `Tìm thấy ${parts.length} phần. Chọn phần để sử dụng cho bài tập.`);
+        showMsg('success', `Tìm thấy ${parts.length} phần nội dung. Chọn phần để sử dụng cho bài tập.`);
       }
     } catch (err) {
       showMsg('error', err.response?.data?.message || 'Không thể quét file cho exercise');
@@ -962,7 +953,7 @@ function TeacherCreateContent() {
         {mode === 'exercise' && (
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Tạo Exercise (AI)</h3>
-            <p style={styles.hintText}>Giáo viên chọn khóa học, kỹ năng, trình độ và số câu. Hệ thống sẽ quét file, tách PART và tạo một bài riêng cho mỗi PART đã chọn.</p>
+            <p style={styles.hintText}>Giáo viên chọn khóa học, kỹ năng, trình độ và số câu. Hệ thống sẽ quét file, tách phần nội dung và tạo một bài riêng cho mỗi phần đã chọn.</p>
             {generateLoading && (
               <div style={styles.loadingBanner}>
                 <span style={styles.loadingDot} />
@@ -1046,13 +1037,7 @@ function TeacherCreateContent() {
               </div>
 
               <div style={{ gridColumn: '1 / -1' }}>
-                <button
-                  type="submit"
-                  style={styles.submitBtn}
-                  disabled={generateLoading || (exerciseForm.skill === 'listening' && !listeningAudioFile)}
-                >
-                  {generateLoading ? 'Đang tạo...' : 'Tạo bằng AI'}
-                </button>
+                <div style={styles.helperText}>Tạo bằng AI đã bị vô hiệu hóa. Vui lòng quét và chọn phần nội dung để tạo bài.</div>
               </div>
 
             {exerciseForm.skill === 'listening' && (
@@ -1072,7 +1057,7 @@ function TeacherCreateContent() {
             )}
 
             <div style={{ marginTop: '12px' }}>
-              <label style={styles.label}>Tải file đề (PDF/DOCX) để tách PARTs</label>
+              <label style={styles.label}>Tải file đề (PDF/DOCX) để quét nội dung</label>
               <input
                 type="file"
                 accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -1081,7 +1066,7 @@ function TeacherCreateContent() {
               />
               <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
                 <button type="button" onClick={previewExerciseFile} style={styles.submitBtn} disabled={exercisePreviewLoading || !exerciseFile}>
-                  {exercisePreviewLoading ? 'Đang quét...' : 'Quét & tách PARTs'}
+                  {exercisePreviewLoading ? 'Đang quét...' : 'Quét nội dung'}
                 </button>
                 <button type="button" onClick={() => { setExerciseFile(null); setExerciseParts([]); setExerciseSelectedParts([]); }} style={styles.cancelBtn}>
                   Xóa
@@ -1090,7 +1075,7 @@ function TeacherCreateContent() {
 
               {exerciseParts.length > 0 && (
                 <div style={{ marginTop: '12px' }}>
-                  <h4 style={styles.subTitle}>Chọn Part để dùng</h4>
+                  <h4 style={styles.subTitle}>Chọn phần nội dung để dùng</h4>
                   <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
                     <button type="button" onClick={() => setExerciseSelectedParts(exerciseParts.map((_part, index) => index))} style={styles.secondaryBtn}>
                       Chọn tất cả ({exerciseParts.length})
@@ -1099,7 +1084,7 @@ function TeacherCreateContent() {
                       Bỏ chọn tất cả
                     </button>
                     <button type="submit" style={styles.submitBtn} disabled={generateLoading || (exerciseForm.skill === 'listening' && !listeningAudioFile)}>
-                      {generateLoading ? 'Đang tạo...' : `Tạo ${exerciseSelectedParts.length > 0 ? exerciseSelectedParts.length : exerciseParts.length} bài theo PART`}
+                      {generateLoading ? 'Đang tạo...' : `Tạo ${exerciseSelectedParts.length > 0 ? exerciseSelectedParts.length : exerciseParts.length} bài`}
                     </button>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
@@ -1169,7 +1154,7 @@ function TeacherCreateContent() {
                     background: '#fff',
                     borderRadius: '12px',
                     padding: '24px',
-                    maxWidth: '600px',
+                    maxWidth: '700px',
                     width: '100%',
                     maxHeight: '80vh',
                     overflow: 'auto',
@@ -1202,20 +1187,63 @@ function TeacherCreateContent() {
                   <div style={{ marginBottom: '12px' }}>
                     <strong style={{ color: '#1f2937', fontSize: '14px' }}>{exerciseParts[selectedPartForDetail].title}</strong>
                   </div>
-                  <div
-                    style={{
-                      background: '#f8fafc',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: '8px',
-                      padding: '16px',
-                      whiteSpace: 'pre-wrap',
-                      color: '#334155',
-                      lineHeight: '1.6',
-                      fontSize: '13px'
-                    }}
-                  >
-                    {exerciseParts[selectedPartForDetail].content}
-                  </div>
+
+                  {/* Display parsed questions with correct answers highlighted */}
+                  {(() => {
+                    const partContent = exerciseParts[selectedPartForDetail].content || '';
+                    const parsedQuestions = parseQuestionsFromText(partContent);
+                    if (parsedQuestions.length > 0) {
+                      return (
+                        <div style={{ marginBottom: '16px' }}>
+                          <strong style={{ color: '#1f2937', fontSize: '13px', display: 'block', marginBottom: '8px' }}>📋 Câu hỏi đã phân tích:</strong>
+                          {parsedQuestions.map((q, idx) => (
+                            <div key={idx} style={{ marginBottom: '12px', padding: '12px', background: '#f1f5f9', borderRadius: '6px', borderLeft: '3px solid #3b82f6' }}>
+                              <strong style={{ color: '#1f2937', fontSize: '13px' }}>{idx + 1}. {q.question}</strong>
+                              <div style={{ marginTop: '8px', marginLeft: '8px' }}>
+                                {q.options.map((opt, optIdx) => {
+                                  const isCorrect = opt === q.correctAnswer;
+                                  return (
+                                    <div key={optIdx} style={{
+                                      padding: '6px 8px',
+                                      margin: '4px 0',
+                                      background: isCorrect ? '#dcfce7' : '#f9fafb',
+                                      borderLeft: isCorrect ? '2px solid #22c55e' : '2px solid #e5e7eb',
+                                      color: isCorrect ? '#166534' : '#374151',
+                                      fontSize: '13px'
+                                    }}>
+                                      {String.fromCharCode(65 + optIdx)}. {opt}
+                                      {isCorrect && <span style={{ marginLeft: '6px', fontWeight: '700' }}>✓ Đáp án đúng</span>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+
+                  <details style={{ marginTop: '12px' }}>
+                    <summary style={{ cursor: 'pointer', color: '#667085', fontSize: '13px', fontWeight: '600', userSelect: 'none' }}>Xem text gốc</summary>
+                    <div
+                      style={{
+                        background: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '8px',
+                        padding: '16px',
+                        whiteSpace: 'pre-wrap',
+                        color: '#334155',
+                        lineHeight: '1.6',
+                        fontSize: '13px',
+                        marginTop: '8px'
+                      }}
+                    >
+                      {exerciseParts[selectedPartForDetail].content}
+                    </div>
+                  </details>
+
                   <div style={{ marginTop: '16px', textAlign: 'right' }}>
                     <button
                       type="button"
@@ -1254,8 +1282,25 @@ function TeacherCreateContent() {
                       )}
                       {item.exerciseSet?.readingPassage && (
                         <div style={styles.previewBlock}>
-                          <strong>Bài đọc:</strong>
+                          <strong>Bài đọc / Đề bài:</strong>
                           <div style={styles.previewText}>{item.exerciseSet.readingPassage}</div>
+                        </div>
+                      )}
+                      {Array.isArray(item.exerciseSet?.questions) && item.exerciseSet.questions.length > 0 && (
+                        <div style={styles.previewBlock}>
+                          <strong>Danh sách câu hỏi:</strong>
+                          <ol style={{ paddingLeft: '20px', marginTop: '8px' }}>
+                            {item.exerciseSet.questions.map((q, qIdx) => (
+                              <li key={qIdx} style={{ marginBottom: '10px' }}>
+                                <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: '4px' }}>{q.question}</div>
+                                <ul style={{ listStyle: 'upper-alpha', paddingLeft: '18px', margin: 0 }}>
+                                  {Array.isArray(q.options) && q.options.map((opt, oIdx) => (
+                                    <li key={oIdx} style={{ fontWeight: 400, color: '#334155', marginBottom: '2px' }}>{opt}</li>
+                                  ))}
+                                </ul>
+                              </li>
+                            ))}
+                          </ol>
                         </div>
                       )}
                       {item.audioUrl && (
@@ -1291,25 +1336,7 @@ function TeacherCreateContent() {
                   ))}
                 </div>
 
-                {createdExerciseInfos.length === 1 && (
-                  <div style={{ marginTop: '14px' }}>
-                    <label style={styles.label}>Khung chat chỉnh sửa với AI</label>
-                    <textarea
-                      style={{ ...styles.input, height: '90px', resize: 'vertical' }}
-                      placeholder="Ví dụ: Hãy làm câu 2 dễ hơn, thêm 1 câu hỏi, đổi từ vựng sang chủ đề technology..."
-                      value={editFeedback}
-                      onChange={(e) => setEditFeedback(e.target.value)}
-                    />
-                    <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-                      <button type="button" onClick={refineExercise} style={styles.submitBtn} disabled={refineLoading || generateLoading}>
-                        {refineLoading ? 'Đang chỉnh sửa...' : generateLoading ? 'Đang tạo bài...' : 'Chỉnh sửa bằng AI'}
-                      </button>
-                      <button type="button" onClick={resetExerciseDraft} style={styles.cancelBtn}>
-                        Tạo bài mới
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {/* AI refine removed */}
 
                 <div style={{ marginTop: '10px' }}>
                   <button type="button" style={styles.secondaryPreviewBtn} onClick={() => navigate(`/courses/${exerciseForm.course_id}/skills/${exerciseForm.skill}/exercises`)}>

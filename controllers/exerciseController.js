@@ -1,5 +1,5 @@
 import { Exercise, Course, Lesson } from '../models/index.js';
-import { parseExerciseParts } from '../services/exerciseImportService.js';
+import { parseExerciseParts, extractQuestionsFromPart, extractPassageTextFromPart } from '../services/exerciseImportService.js';
 
 const normalizeSkillType = (skill) => {
   if (!skill) return null;
@@ -174,9 +174,96 @@ export const deleteExercise = async (req, res) => {
 export const previewExerciseFile = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'File is required' });
-    const parsed = await parseExerciseParts(req.file);
+    const skill = req.body?.skill || req.query?.skill || 'speaking';
+    const normalizedSkill = normalizeSkillType(skill) || 'speaking';
+    const parsed = await parseExerciseParts(req.file, { skill: normalizedSkill });
     return res.json({ fileType: parsed.fileType, parts: parsed.parts || [], rawText: parsed.rawText || '' });
   } catch (error) {
     return res.status(400).json({ message: error.message });
+  }
+};
+
+export const createExercisesFromParts = async (req, res) => {
+  try {
+    const { course_id, exerciseTitle, skill, cefrLevel } = req.body;
+    let parts = [];
+    try {
+      parts = req.body.parts ? (typeof req.body.parts === 'string' ? JSON.parse(req.body.parts) : req.body.parts) : [];
+    } catch (_e) {
+      return res.status(400).json({ message: 'Invalid parts payload' });
+    }
+
+    if (!course_id) return res.status(400).json({ message: 'course_id is required' });
+    const course = await Course.findOne({ where: { id: course_id, is_deleted: false } });
+    if (!course) return res.status(400).json({ message: 'course_id is invalid or deleted' });
+
+    const normalizedSkill = normalizeSkillType(skill) || 'reading';
+    const normalizedLevel = normalizeCefrLevel(cefrLevel) || 'A2';
+
+    // handle optional audio upload (req.file) - save to uploads/audio like AI controller
+    let audioUrl = null;
+    if (req.file) {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const fname = `audio-${Date.now()}-${Math.random().toString(36).slice(2,9)}.${(req.file.mimetype||'audio').split('/').pop()}`;
+      const targetDir = path.resolve('uploads', 'audio');
+      await fs.mkdir(targetDir, { recursive: true });
+      const targetPath = path.join(targetDir, fname);
+      await fs.writeFile(targetPath, req.file.buffer);
+      audioUrl = `/uploads/audio/${fname}`;
+    }
+
+    const created = [];
+
+    for (let i = 0; i < parts.length; i += 1) {
+      const p = parts[i] || {};
+      // Use only the user-provided exerciseTitle as the exercise name
+      const name = String(exerciseTitle || 'Untitled').trim();
+
+      const fullPartText = String(p.content || '').trim();
+      const introText = extractPassageTextFromPart(fullPartText);
+      const reading_passage = normalizedSkill === 'reading' ? (introText || null) : null;
+      const task_prompt = normalizedSkill === 'listening' ? (introText || null) : null;
+      const sample_answer = null;
+      
+      // Parse questions, using AI for reading answers if needed
+      const questions = await extractQuestionsFromPart(fullPartText, {
+        skill: normalizedSkill,
+        useAiForAnswers: normalizedSkill === 'reading'
+      });
+      
+      // Hide correctAnswer in response for UI (but still save in DB)
+      const questionsForUi = questions.map(q => ({ question: q.question, options: q.options }));
+      const questions_json = JSON.stringify(questions);
+      const time_limit_sec = (normalizedSkill === 'writing' || normalizedSkill === 'speaking') ? 900 : 300;
+
+      const row = await Exercise.create({
+        course_id: Number(course_id),
+        title: name,
+        skill_type: normalizedSkill,
+        cefr_level: normalizedLevel,
+        reading_passage,
+        task_prompt,
+        sample_answer,
+        audio_url: audioUrl,
+        questions_json,
+        time_limit_sec,
+        is_deleted: false
+      });
+
+      created.push({
+        exerciseId: row.id,
+        exerciseTitle: name,
+        readingPassage: reading_passage,
+        taskPrompt: task_prompt,
+        questions: questionsForUi, // Return questions without correct answers
+        questionCount: questionsForUi.length
+      });
+    }
+
+    return res.json({ created });
+  } catch (error) {
+    console.error('[createExercisesFromParts] Error:', error);
+    return res.status(500).json({ message: error.message });
   }
 };

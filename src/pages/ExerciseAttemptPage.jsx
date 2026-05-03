@@ -16,6 +16,26 @@ function formatTime(totalSeconds) {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
+function extractIntroText(fullText) {
+  const source = String(fullText || '').trim();
+  if (!source) return '';
+  const firstQuestionIndex = source.search(/(?:^|\n)\s*\d+\s*[\.)]\s+/m);
+  return (firstQuestionIndex >= 0 ? source.slice(0, firstQuestionIndex) : source).trim();
+}
+
+function resolveCorrectAnswerText(question) {
+  const direct = String(question?.correctAnswer || '').trim();
+  if (!direct) return '';
+
+  // Legacy format support: correctAnswer stored as option letter (A/B/C/D)
+  if (/^[A-D]$/i.test(direct)) {
+    const index = direct.toUpperCase().charCodeAt(0) - 65;
+    return String(question?.options?.[index] || '').trim();
+  }
+
+  return direct;
+}
+
 function ExerciseAttemptPage() {
   const navigate = useNavigate();
   const { courseId, skill, exerciseId } = useParams();
@@ -82,6 +102,7 @@ function ExerciseAttemptPage() {
 
   const questions = useMemo(() => parseQuestions(exercise?.questions_json), [exercise]);
   const readingPassage = String(exercise?.reading_passage || '').trim();
+  const readingPassageDisplay = useMemo(() => extractIntroText(readingPassage), [readingPassage]);
   const taskPrompt = String(exercise?.task_prompt || '').trim();
   const audioUrl = exercise?.audio_url || '';
   const isReading = exercise?.skill_type === 'reading';
@@ -93,7 +114,8 @@ function ExerciseAttemptPage() {
     if (!submitted || questions.length === 0) return 0;
     const correct = questions.reduce((acc, q, idx) => {
       const selected = answers[idx];
-      return selected && selected === q.correctAnswer ? acc + 1 : acc;
+      const correctAnswerText = resolveCorrectAnswerText(q);
+      return selected && selected === correctAnswerText ? acc + 1 : acc;
     }, 0);
     return Math.round((correct / questions.length) * 100);
   }, [submitted, questions, answers]);
@@ -301,7 +323,7 @@ function ExerciseAttemptPage() {
 
           {!loading && !error && (
             <>
-              {isReading && readingPassage && (
+              {isReading && readingPassageDisplay && (
                 <div style={styles.passageCard}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h3 style={styles.sectionTitle}>Bài đọc</h3>
@@ -318,7 +340,7 @@ function ExerciseAttemptPage() {
                       </div>
                     </div>
                   ) : (
-                    <p style={styles.passageText}>{readingPassage}</p>
+                    <p style={styles.passageText}>{readingPassageDisplay}</p>
                   )}
                 </div>
               )}
@@ -587,8 +609,9 @@ function ExerciseAttemptPage() {
                     <div style={styles.optionGrid}>
                       {(q.options || []).map((opt, optionIndex) => {
                         const selected = answers[idx] === opt;
-                        const isCorrect = submitted && opt === q.correctAnswer;
-                        const isWrongSelected = submitted && selected && opt !== q.correctAnswer;
+                        const correctAnswerText = resolveCorrectAnswerText(q);
+                        const isCorrect = submitted && opt === correctAnswerText;
+                        const isWrongSelected = submitted && selected && opt !== correctAnswerText;
 
                         return (
                           <button
