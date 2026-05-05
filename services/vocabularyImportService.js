@@ -32,6 +32,10 @@ const detectFileType = (file) => {
   const mime = String(file?.mimetype || '').toLowerCase();
   const name = String(file?.originalname || '').toLowerCase();
 
+  if (name.endsWith('.doc') && !name.endsWith('.docx')) {
+    throw new Error('DOC (.doc) is not supported. Please convert and upload a DOCX (.docx) file.');
+  }
+
   if (mime === DOCX_MIME || name.endsWith('.docx')) {
     return 'docx';
   }

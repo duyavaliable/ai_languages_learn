@@ -48,7 +48,6 @@ function SkillExercisesPage() {
         {!loading && !error && (
           <>
             <div style={styles.infoCard}>
-              <div><strong>Khóa học:</strong> {course?.name}</div>
               <div><strong>Kỹ năng:</strong> {SKILL_LABEL[skill] || skill}</div>
             </div>
 

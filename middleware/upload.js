@@ -30,7 +30,6 @@ const allowedVocabularyTypes = new Set([
   'application/pdf',
   'application/x-pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/msword',
   'application/octet-stream',
   'text/plain'
 ]);

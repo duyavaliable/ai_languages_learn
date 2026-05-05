@@ -35,6 +35,7 @@ const getExercisePart = (exercise) => {
 
 function HomePage() {
   const navigate = useNavigate();
+  const [headerNav, setHeaderNav] = useState('dashboard');
   const [exercises, setExercises] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -126,6 +127,32 @@ function HomePage() {
               <div className="text-xs text-muted-foreground">Practice tests & exercises</div>
             </div>
           </button>
+
+          <div className="hidden md:flex items-center justify-center">
+            <nav className="inline-flex items-center gap-3 rounded-full bg-background/60 p-1">
+              <button
+                onClick={() => { setHeaderNav('dashboard'); navigate('/'); }}
+                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${headerNav === 'dashboard' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
+              >
+                <LibraryBig className="h-4 w-4" />
+                Dashboard
+              </button>
+              <button
+                onClick={() => { setHeaderNav('english'); navigate('/courses'); }}
+                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${headerNav === 'english' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
+              >
+                <BookOpen className="h-4 w-4" />
+                English
+              </button>
+              <button
+                onClick={() => { setHeaderNav('japanese'); navigate('/courses?lang=ja'); }}
+                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${headerNav === 'japanese' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
+              >
+                <BookOpen className="h-4 w-4" />
+                Japanese
+              </button>
+            </nav>
+          </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="hidden items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5 text-sm text-muted-foreground md:flex">

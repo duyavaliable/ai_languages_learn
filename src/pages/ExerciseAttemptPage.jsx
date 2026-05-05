@@ -157,8 +157,8 @@ function ExerciseAttemptPage() {
 
   const score = useMemo(() => {
     if (!submitted || questions.length === 0 || isWriting) return 0;
-    return questions.reduce((acc, question) => {
-      const selected = answers[question.id];
+    return questions.reduce((acc, question, index) => {
+      const selected = answers[String(question?.id ?? `q-${index}`)];
       const correctAnswerText = resolveCorrectAnswerText(question);
       return selected && selected === correctAnswerText ? acc + 1 : acc;
     }, 0);
@@ -205,9 +205,11 @@ function ExerciseAttemptPage() {
     questionRefs.current[index]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
-  const selectAnswer = (questionId, value) => {
+  const getQuestionKey = (question, index) => String(question?.id ?? `q-${index}`);
+
+  const selectAnswer = (questionKey, value) => {
     if (submitted) return;
-    setAnswers((prev) => ({ ...prev, [questionId]: value }));
+    setAnswers((prev) => ({ ...prev, [questionKey]: value }));
   };
 
   const toggleSpeakingRecording = () => {
@@ -290,7 +292,8 @@ function ExerciseAttemptPage() {
 
               <div className="custom-scrollbar space-y-4 overflow-y-auto pr-1 xl:max-h-[calc(100vh-260px)]">
                 {questions.map((question, index) => {
-                  const selectedAnswer = answers[question.id];
+                  const questionKey = getQuestionKey(question, index);
+                  const selectedAnswer = answers[questionKey];
                   const correctAnswerText = resolveCorrectAnswerText(question);
                   const isCorrect = submitted && selectedAnswer === correctAnswerText;
                   const isWrong = submitted && selectedAnswer && selectedAnswer !== correctAnswerText;
@@ -317,7 +320,7 @@ function ExerciseAttemptPage() {
                           return (
                             <button
                               key={`${question.id || index}-${optionIndex}`}
-                              onClick={() => selectAnswer(question.id, option.value)}
+                              onClick={() => selectAnswer(questionKey, option.value)}
                               className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition-smooth ${!submitted && isSelected ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40 hover:bg-secondary/80'} ${isOptionCorrect ? 'border-success bg-success/10' : ''} ${isOptionWrong ? 'border-destructive bg-destructive/10' : ''}`}
                               disabled={submitted}
                             >
@@ -387,7 +390,8 @@ function ExerciseAttemptPage() {
 
             <section className="space-y-4">
               {questions.map((question, index) => {
-                const selectedAnswer = answers[question.id];
+                const questionKey = getQuestionKey(question, index);
+                const selectedAnswer = answers[questionKey];
                 const correctAnswerText = resolveCorrectAnswerText(question);
                 const isCorrect = submitted && selectedAnswer === correctAnswerText;
                 const isWrong = submitted && selectedAnswer && selectedAnswer !== correctAnswerText;
@@ -414,7 +418,7 @@ function ExerciseAttemptPage() {
                         return (
                           <button
                             key={`${question.id || index}-${optionIndex}`}
-                            onClick={() => selectAnswer(question.id, option.value)}
+                            onClick={() => selectAnswer(questionKey, option.value)}
                             className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition-smooth ${!submitted && isSelected ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40 hover:bg-secondary/80'} ${isOptionCorrect ? 'border-success bg-success/10' : ''} ${isOptionWrong ? 'border-destructive bg-destructive/10' : ''}`}
                             disabled={submitted}
                           >
@@ -716,28 +720,7 @@ function ExerciseAttemptPage() {
         )}
       </main>
 
-      {!loading && !error && hasQuestions && !isWriting && !isSpeaking && (
-        <footer className="sticky bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur-xl shadow-sticky">
-          <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
-            <div className="flex flex-wrap items-center gap-2">
-              {questions.map((question, index) => (
-                <button
-                  key={question.id || index}
-                  onClick={() => goToQuestion(index)}
-                  className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-semibold transition-smooth ${index === currentQuestion && !submitted ? 'gradient-primary text-primary-foreground shadow-elegant' : answers[question.id] ? 'bg-primary/10 text-primary' : 'border border-border text-muted-foreground hover:border-primary'}`}
-                >
-                  {question.id || index + 1}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-3">
-              <button onClick={handleSubmit} className="rounded-full gradient-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-elegant transition-smooth hover:shadow-glow">
-                {submitted ? 'Đã nộp' : 'Nộp bài'}
-              </button>
-            </div>
-          </div>
-        </footer>
-      )}
+      
 
       {!loading && !error && isListening && (
         <footer className="sticky bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur-xl shadow-sticky">
@@ -747,17 +730,13 @@ function ExerciseAttemptPage() {
                 <button
                   key={question.id || index}
                   onClick={() => goToQuestion(index)}
-                  className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-semibold transition-smooth ${index === currentQuestion && !submitted ? 'gradient-primary text-primary-foreground shadow-elegant' : answers[question.id] ? 'bg-primary/10 text-primary' : 'border border-border text-muted-foreground hover:border-primary'}`}
+                  className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-semibold transition-smooth ${index === currentQuestion && !submitted ? 'gradient-primary text-primary-foreground shadow-elegant' : answers[getQuestionKey(question, index)] ? 'bg-primary/10 text-primary' : 'border border-border text-muted-foreground hover:border-primary'}`}
                 >
                   {question.id || index + 1}
                 </button>
               ))}
             </div>
             <div className="flex items-center gap-3">
-              <div className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-2 font-mono text-sm font-semibold">
-                <Clock3 className="h-4 w-4" />
-                {formatTime(secondsLeft)}
-              </div>
               <button onClick={handleSubmit} className="rounded-full gradient-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-elegant transition-smooth hover:shadow-glow">
                 {submitted ? 'Đã nộp' : 'Nộp bài'}
               </button>

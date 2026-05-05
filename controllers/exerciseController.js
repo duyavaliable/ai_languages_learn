@@ -223,8 +223,6 @@ export const createExercisesFromParts = async (req, res) => {
         useAiForAnswers: normalizedSkill === 'reading'
       });
       
-      // Hide correctAnswer in response for UI (but still save in DB)
-      const questionsForUi = questions.map(q => ({ question: q.question, options: q.options }));
       const questions_json = JSON.stringify(questions);
       const time_limit_sec = (normalizedSkill === 'writing' || normalizedSkill === 'speaking') ? 900 : 300;
 
@@ -247,8 +245,8 @@ export const createExercisesFromParts = async (req, res) => {
         exerciseTitle: name,
         readingPassage: reading_passage,
         taskPrompt: task_prompt,
-        questions: questionsForUi, // Return questions without correct answers
-        questionCount: questionsForUi.length
+        questions,
+        questionCount: questions.length
       });
     }
 
