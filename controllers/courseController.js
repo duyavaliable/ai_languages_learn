@@ -1,42 +1,47 @@
-import { Course, Language, Lesson } from '../models/index.js';
-import { Op } from 'sequelize';
+import { Exercise } from '../models/index.js';
 
-const SUPPORTED_LANGUAGE_CODES = ['en', 'ja'];
+const buildCourseSummary = (courseId, exercises) => {
+  const firstExercise = exercises[0] || {};
+  return {
+    id: Number(courseId),
+    language_id: null,
+    name: `Khóa ${courseId}`,
+    description: null,
+    level: firstExercise.cefr_level || null,
+    duration: null,
+    is_deleted: false,
+    lessons: [],
+    exercises_count: exercises.length
+  };
+};
 
-const hasSupportedLanguage = async (languageId) => {
-  if (!languageId) {
-    return false;
-  }
-
-  const language = await Language.findOne({
-    where: {
-      id: languageId,
-      code: {
-        [Op.in]: SUPPORTED_LANGUAGE_CODES
-      }
-    }
+const loadVirtualCourses = async () => {
+  const exercises = await Exercise.findAll({
+    where: { is_deleted: false },
+    order: [['id', 'DESC']]
   });
 
-  return Boolean(language);
+  const grouped = new Map();
+  for (const exercise of exercises) {
+    const courseId = Number(exercise.course_id);
+    if (!courseId) {
+      continue;
+    }
+
+    if (!grouped.has(courseId)) {
+      grouped.set(courseId, []);
+    }
+    grouped.get(courseId).push(exercise);
+  }
+
+  return Array.from(grouped.entries())
+    .map(([courseId, rows]) => buildCourseSummary(courseId, rows))
+    .sort((a, b) => b.id - a.id);
 };
 
 export const getCourses = async (req, res) => {
   try {
-    const { language, level } = req.query;
-    const where = { is_deleted: false };
-
-    if (language) where.language_id = language;
-    if (level) where.level = level;
-
-    const courses = await Course.findAll({
-      where,
-      include: [
-        { model: Language, as: 'language' },
-        { model: Lesson, as: 'lessons', where: { is_deleted: false }, required: false }
-      ],
-      order: [['id', 'DESC']]
-    });
-
+    const courses = await loadVirtualCourses();
     res.json(courses);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -45,13 +50,9 @@ export const getCourses = async (req, res) => {
 
 export const getCourseById = async (req, res) => {
   try {
-    const course = await Course.findOne({
-      where: { id: req.params.id, is_deleted: false },
-      include: [
-        { model: Language, as: 'language' },
-        { model: Lesson, as: 'lessons', where: { is_deleted: false }, required: false }
-      ]
-    });
+    const courseId = Number(req.params.id);
+    const courses = await loadVirtualCourses();
+    const course = courses.find((item) => Number(item.id) === courseId);
 
     if (!course) {
       return res.status(404).json({ message: 'Course not found' });
@@ -65,15 +66,7 @@ export const getCourseById = async (req, res) => {
 
 export const createCourse = async (req, res) => {
   try {
-    const { language_id } = req.body;
-
-    const validLanguage = await hasSupportedLanguage(language_id);
-    if (!validLanguage) {
-      return res.status(400).json({ message: 'language_id must be Tiếng Anh hoặc Tiếng Nhật' });
-    }
-
-    const course = await Course.create({ ...req.body, is_deleted: false });
-    res.status(201).json(course);
+    res.status(410).json({ message: 'Course table has been removed. Course CRUD is disabled.' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -81,20 +74,7 @@ export const createCourse = async (req, res) => {
 
 export const updateCourse = async (req, res) => {
   try {
-    const course = await Course.findOne({ where: { id: req.params.id, is_deleted: false } });
-    if (!course) {
-      return res.status(404).json({ message: 'Course not found' });
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'language_id')) {
-      const validLanguage = await hasSupportedLanguage(req.body.language_id);
-      if (!validLanguage) {
-        return res.status(400).json({ message: 'language_id must be Tiếng Anh hoặc Tiếng Nhật' });
-      }
-    }
-
-    await course.update(req.body);
-    res.json(course);
+    res.status(410).json({ message: 'Course table has been removed. Course CRUD is disabled.' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -102,12 +82,7 @@ export const updateCourse = async (req, res) => {
 
 export const getDeletedCourses = async (req, res) => {
   try {
-    const courses = await Course.findAll({
-      where: { is_deleted: true },
-      include: [{ model: Language, as: 'language' }],
-      order: [['id', 'DESC']]
-    });
-    res.json(courses);
+    res.json([]);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -115,13 +90,7 @@ export const getDeletedCourses = async (req, res) => {
 
 export const restoreCourse = async (req, res) => {
   try {
-    const course = await Course.findOne({ where: { id: req.params.id, is_deleted: true } });
-    if (!course) {
-      return res.status(404).json({ message: 'Course not found' });
-    }
-
-    await course.update({ is_deleted: false });
-    res.json({ message: 'Course restored successfully' });
+    res.status(410).json({ message: 'Course table has been removed. Course CRUD is disabled.' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -129,19 +98,7 @@ export const restoreCourse = async (req, res) => {
 
 export const deleteCourse = async (req, res) => {
   try {
-    const course = await Course.findOne({ where: { id: req.params.id, is_deleted: false } });
-    if (!course) {
-      return res.status(404).json({ message: 'Course not found' });
-    }
-
-    await course.update({ is_deleted: true });
-
-    await Lesson.update(
-      { is_deleted: true },
-      { where: { course_id: course.id, is_deleted: false } }
-    );
-
-    res.json({ message: 'Course soft deleted successfully' });
+    res.status(410).json({ message: 'Course table has been removed. Course CRUD is disabled.' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

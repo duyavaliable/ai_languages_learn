@@ -21,6 +21,7 @@ import exerciseRoutes from './routes/exercises.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const clientDistDir = path.resolve('dist');
 
 // Kiểm tra kết nối MySQL
 sequelize.authenticate()
@@ -54,6 +55,16 @@ app.use('/api/users', userRoutes);
 app.use('/api/languages', languageRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/exercises', exerciseRoutes);
+
+if (fs.existsSync(clientDistDir)) {
+  app.use(express.static(clientDistDir));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) {
+      return next();
+    }
+    res.sendFile(path.join(clientDistDir, 'index.html'));
+  });
+}
 
 // Error Handler
 app.use(errorHandler);

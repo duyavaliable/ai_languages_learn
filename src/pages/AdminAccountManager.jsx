@@ -120,13 +120,17 @@ function AdminAccountManager() {
     }
   };
 
+  const activeCount = users.filter((user) => user.is_active).length;
+  const teacherCount = users.filter((user) => user.role === 'teacher').length;
+  const adminCount = users.filter((user) => user.role === 'admin').length;
+
   return (
     <div style={styles.wrapper}>
       {/* Header */}
       <div style={styles.header}>
         <div style={styles.headerLeft}>
           <button onClick={() => navigate('/')} style={styles.backBtn}>← Quay lại</button>
-          <span style={styles.logo}>👥 Quản lý tài khoản</span>
+          <span style={styles.logo}>Quản lý tài khoản</span>
         </div>
         <div style={styles.headerRight}>
           <span style={styles.welcomeText}>
@@ -136,6 +140,34 @@ function AdminAccountManager() {
       </div>
 
       <div style={styles.content}>
+        <section style={styles.heroCard}>
+          <div>
+            <p style={styles.heroEyebrow}>Admin dashboard</p>
+            <h1 style={styles.heroTitle}>Quản lý tài khoản</h1>
+            <p style={styles.heroDescription}>
+              Theo dõi trạng thái tài khoản, phân quyền và xử lý danh sách xóa mềm trong một bố cục rõ ràng, hiện đại.
+            </p>
+          </div>
+          <div style={styles.heroStats}>
+            <div style={styles.statCard}>
+              <span style={styles.statLabel}>Tổng</span>
+              <strong style={styles.statValue}>{users.length}</strong>
+            </div>
+            <div style={styles.statCard}>
+              <span style={styles.statLabel}>Hoạt động</span>
+              <strong style={styles.statValue}>{activeCount}</strong>
+            </div>
+            <div style={styles.statCard}>
+              <span style={styles.statLabel}>Teacher</span>
+              <strong style={styles.statValue}>{teacherCount}</strong>
+            </div>
+            <div style={styles.statCard}>
+              <span style={styles.statLabel}>Admin</span>
+              <strong style={styles.statValue}>{adminCount}</strong>
+            </div>
+          </div>
+        </section>
+
         {/* Top bar */}
         <div style={styles.topBar}>
           <h2 style={styles.sectionTitle}>Danh sách tài khoản ({users.length})</h2>
@@ -362,185 +394,218 @@ const roleBadgeStyle = (role) => ({
 });
 
 const styles = {
-  wrapper: { fontFamily: 'sans-serif', minHeight: '100vh', background: '#f5f6fa' },
+  wrapper: {
+    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+    minHeight: '100vh',
+    background: 'radial-gradient(circle at top left, #eef4ff 0%, #f7f9ff 35%, #eef2ff 100%)'
+  },
   header: {
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    background: 'rgba(255,255,255,0.84)',
+    backdropFilter: 'blur(18px)',
+    borderBottom: '1px solid rgba(148,163,184,0.18)',
     padding: '16px 32px',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    color: '#fff'
+    color: '#0f172a',
+    boxShadow: '0 8px 30px rgba(15,23,42,0.06)'
   },
   headerLeft: { display: 'flex', alignItems: 'center', gap: '16px' },
   headerRight: {},
   backBtn: {
-    background: 'rgba(255,255,255,0.2)',
+    background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
     color: '#fff',
-    border: '1px solid rgba(255,255,255,0.4)',
+    border: 'none',
     padding: '7px 16px',
-    borderRadius: '6px',
+    borderRadius: '999px',
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: '600'
   },
-  logo: { fontSize: '20px', fontWeight: 'bold' },
-  welcomeText: { fontSize: '14px' },
-  content: { maxWidth: '1100px', margin: '0 auto', padding: '32px 24px' },
-  topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
-  sectionTitle: { color: '#333', margin: 0, fontSize: '20px' },
+  logo: { fontSize: '20px', fontWeight: '800', letterSpacing: '-0.02em' },
+  welcomeText: { fontSize: '14px', color: '#475569' },
+  content: { maxWidth: '1280px', margin: '0 auto', padding: '28px 24px 40px' },
+  heroCard: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1.3fr) minmax(280px, 0.9fr)',
+    gap: '20px',
+    padding: '24px 28px',
+    marginBottom: '20px',
+    borderRadius: '28px',
+    background: 'linear-gradient(135deg, rgba(79,70,229,0.96) 0%, rgba(124,58,237,0.92) 52%, rgba(59,130,246,0.9) 100%)',
+    color: '#fff',
+    boxShadow: '0 24px 60px rgba(79,70,229,0.22)'
+  },
+  heroEyebrow: { margin: 0, fontSize: '12px', fontWeight: '700', letterSpacing: '0.24em', textTransform: 'uppercase', opacity: 0.85 },
+  heroTitle: { margin: '8px 0 10px', fontSize: '30px', lineHeight: 1.1, letterSpacing: '-0.04em' },
+  heroDescription: { margin: 0, maxWidth: '680px', color: 'rgba(255,255,255,0.86)', fontSize: '14px', lineHeight: 1.7 },
+  heroStats: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', alignSelf: 'stretch' },
+  statCard: {
+    borderRadius: '20px',
+    background: 'rgba(255,255,255,0.16)',
+    border: '1px solid rgba(255,255,255,0.18)',
+    padding: '16px'
+  },
+  statLabel: { display: 'block', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.16em', opacity: 0.82, marginBottom: '10px' },
+  statValue: { fontSize: '28px', lineHeight: 1, fontWeight: '800' },
+  topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '16px', flexWrap: 'wrap' },
+  sectionTitle: { color: '#0f172a', margin: 0, fontSize: '20px', fontWeight: '800', letterSpacing: '-0.02em' },
   createBtn: {
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
     color: '#fff',
     border: 'none',
     padding: '10px 22px',
-    borderRadius: '8px',
+    borderRadius: '999px',
     cursor: 'pointer',
     fontWeight: '600',
     fontSize: '14px'
   },
   createCard: {
-    background: '#fff',
-    borderRadius: '12px',
+    background: 'rgba(248,250,252,0.92)',
+    borderRadius: '22px',
     padding: '24px',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.08)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.6)',
     marginBottom: '24px',
-    borderLeft: '4px solid #667eea'
+    border: '1px solid rgba(148,163,184,0.18)'
   },
-  createTitle: { color: '#333', marginTop: 0, marginBottom: '18px', fontSize: '16px' },
+  createTitle: { color: '#0f172a', marginTop: 0, marginBottom: '18px', fontSize: '16px', fontWeight: '700' },
   formRow: { display: 'flex', gap: '16px', marginBottom: '14px' },
   formGroup: { flex: 1 },
-  label: { display: 'block', color: '#555', fontSize: '13px', fontWeight: '600', marginBottom: '6px' },
+  label: { display: 'block', color: '#475569', fontSize: '13px', fontWeight: '700', marginBottom: '6px' },
   input: {
     width: '100%',
     padding: '10px 14px',
-    borderRadius: '8px',
-    border: '1px solid #ddd',
+    borderRadius: '14px',
+    border: '1px solid rgba(148,163,184,0.22)',
     fontSize: '14px',
     boxSizing: 'border-box',
     outline: 'none',
-    color: '#333'
+    color: '#0f172a',
+    background: '#fff'
   },
   submitBtn: {
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
     color: '#fff',
     border: 'none',
     padding: '10px 26px',
-    borderRadius: '8px',
+    borderRadius: '999px',
     cursor: 'pointer',
     fontWeight: '600',
     fontSize: '14px',
     marginTop: '6px'
   },
   successBanner: {
-    background: '#f0fff4',
-    color: '#276749',
-    border: '1px solid #c6f6d5',
+    background: '#ecfdf5',
+    color: '#166534',
+    border: '1px solid #bbf7d0',
     padding: '10px 16px',
-    borderRadius: '8px',
+    borderRadius: '14px',
     marginBottom: '16px',
     fontSize: '14px'
   },
   errorBanner: {
-    background: '#fff5f5',
-    color: '#c53030',
-    border: '1px solid #fed7d7',
+    background: '#fff1f2',
+    color: '#be123c',
+    border: '1px solid #fecdd3',
     padding: '10px 16px',
-    borderRadius: '8px',
+    borderRadius: '14px',
     marginBottom: '16px',
     fontSize: '14px'
   },
   tableWrapper: {
-    background: '#fff',
-    borderRadius: '12px',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.08)',
-    overflow: 'hidden'
+    background: 'rgba(255,255,255,0.86)',
+    borderRadius: '20px',
+    boxShadow: '0 12px 30px rgba(15,23,42,0.06)',
+    overflow: 'hidden',
+    border: '1px solid rgba(148,163,184,0.14)'
   },
   table: { width: '100%', borderCollapse: 'collapse' },
-  tableHeadRow: { background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' },
-  th: { padding: '14px 16px', color: '#fff', textAlign: 'left', fontSize: '13px', fontWeight: '600' },
-  tableRow: { borderBottom: '1px solid #f0f0f0' },
-  td: { padding: '13px 16px', fontSize: '14px', color: '#333' },
-  selfBadge: { color: '#999', fontSize: '12px', fontStyle: 'italic' },
+  tableHeadRow: { background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' },
+  th: { padding: '14px 16px', color: '#fff', textAlign: 'left', fontSize: '13px', fontWeight: '700' },
+  tableRow: { borderBottom: '1px solid rgba(226,232,240,0.9)' },
+  td: { padding: '13px 16px', fontSize: '14px', color: '#0f172a' },
+  selfBadge: { color: '#64748b', fontSize: '12px', fontStyle: 'italic' },
   roleSelect: {
     padding: '5px 10px',
-    borderRadius: '6px',
-    border: '1px solid #ddd',
+    borderRadius: '10px',
+    border: '1px solid rgba(148,163,184,0.22)',
     fontSize: '13px',
     cursor: 'pointer',
-    color: '#333'
+    color: '#0f172a',
+    background: '#fff'
   },
   activeBadge: {
-    background: '#c6f6d5',
-    color: '#276749',
+    background: '#dcfce7',
+    color: '#166534',
     padding: '3px 10px',
-    borderRadius: '12px',
+    borderRadius: '999px',
     fontSize: '12px',
     fontWeight: '600'
   },
   lockedBadge: {
-    background: '#fed7d7',
-    color: '#c53030',
+    background: '#fee2e2',
+    color: '#b91c1c',
     padding: '3px 10px',
-    borderRadius: '12px',
+    borderRadius: '999px',
     fontSize: '12px',
     fontWeight: '600'
   },
   lockBtn: {
-    background: '#fff5f5',
-    color: '#c53030',
-    border: '1px solid #fed7d7',
+    background: '#fff1f2',
+    color: '#be123c',
+    border: '1px solid #fecdd3',
     padding: '5px 13px',
-    borderRadius: '6px',
+    borderRadius: '10px',
     cursor: 'pointer',
     fontSize: '12px',
     fontWeight: '600'
   },
   unlockBtn: {
-    background: '#f0fff4',
-    color: '#276749',
-    border: '1px solid #c6f6d5',
+    background: '#ecfdf5',
+    color: '#166534',
+    border: '1px solid #bbf7d0',
     padding: '5px 13px',
-    borderRadius: '6px',
+    borderRadius: '10px',
     cursor: 'pointer',
     fontSize: '12px',
     fontWeight: '600'
   },
-  naText: { color: '#ccc', fontSize: '14px' },
+  naText: { color: '#cbd5e1', fontSize: '14px' },
   deletedSection: { marginBottom: '24px' },
   deletedToggleBtn: {
-    background: '#fff5f5',
-    color: '#c53030',
-    border: '1px solid #fed7d7',
+    background: '#fff7ed',
+    color: '#c2410c',
+    border: '1px solid #fed7aa',
     padding: '9px 18px',
-    borderRadius: '8px',
+    borderRadius: '999px',
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: '600'
   },
   restoreBtn: {
-    background: '#f0fff4',
-    color: '#276749',
-    border: '1px solid #c6f6d5',
+    background: '#ecfdf5',
+    color: '#166534',
+    border: '1px solid #bbf7d0',
     padding: '5px 13px',
-    borderRadius: '6px',
+    borderRadius: '10px',
     cursor: 'pointer',
     fontSize: '12px',
     fontWeight: '600'
   },
   actionGroup: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
   deleteBtn: {
-    background: '#fffaf0',
-    color: '#c05621',
-    border: '1px solid #fbd38d',
+    background: '#fff7ed',
+    color: '#c2410c',
+    border: '1px solid #fed7aa',
     padding: '5px 13px',
-    borderRadius: '6px',
+    borderRadius: '10px',
     cursor: 'pointer',
     fontSize: '12px',
     fontWeight: '600'
   },
-  statusText: { color: '#888', textAlign: 'center', padding: '40px' },
-  errorText: { color: '#c53030', fontSize: '14px', margin: '8px 0' },
-  successText: { color: '#276749', fontSize: '14px', margin: '8px 0' }
+  statusText: { color: '#64748b', textAlign: 'center', padding: '40px' },
+  errorText: { color: '#be123c', fontSize: '14px', margin: '8px 0' },
+  successText: { color: '#166534', fontSize: '14px', margin: '8px 0' }
 };
 
 export default AdminAccountManager;

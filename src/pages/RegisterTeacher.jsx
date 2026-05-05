@@ -32,9 +32,16 @@ function RegisterTeacherPage() {
 
   return (
     <div style={styles.container}>
+      <div style={styles.brandPanel}>
+        <div style={styles.brandBadge}>Teacher workspace</div>
+        <h1 style={styles.brandTitle}>Đăng ký tài khoản giáo viên</h1>
+        <p style={styles.brandText}>
+          Tạo tài khoản để vào không gian làm việc riêng cho teacher, nơi bạn có thể tạo vocabulary và exercise theo course.
+        </p>
+      </div>
       <div style={styles.card}>
         <h2 style={styles.title}>Đăng ký Teacher</h2>
-        <p style={styles.subtitle}>Trang đăng ký dành cho giáo viên</p>
+        <p style={styles.subtitle}>Một bước để vào dashboard dành cho giáo viên.</p>
 
         {error && <div style={styles.error}>{error}</div>}
 
@@ -96,28 +103,66 @@ const styles = {
   container: {
     minHeight: '100vh',
     display: 'flex',
+    flexWrap: 'wrap',
+    gap: '24px',
     alignItems: 'center',
     justifyContent: 'center',
-    background: 'linear-gradient(140deg, #0f766e 0%, #155e75 45%, #1d4ed8 100%)',
-    fontFamily: 'sans-serif',
-    padding: '20px'
+    background: 'radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 28%), linear-gradient(180deg, #eef4fb 0%, #f7f9fc 55%, #edf2f8 100%)',
+    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+    padding: '28px'
+  },
+  brandPanel: {
+    flex: '1 1 480px',
+    maxWidth: '560px',
+    padding: '20px 12px'
+  },
+  brandBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    borderRadius: '999px',
+    border: '1px solid rgba(37, 99, 235, 0.18)',
+    background: 'rgba(255,255,255,0.8)',
+    color: '#1d4ed8',
+    padding: '8px 12px',
+    fontSize: '12px',
+    fontWeight: 700,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase'
+  },
+  brandTitle: {
+    margin: '18px 0 12px',
+    fontSize: '44px',
+    lineHeight: 1.06,
+    color: '#0f172a',
+    letterSpacing: '-0.04em'
+  },
+  brandText: {
+    margin: 0,
+    color: '#475569',
+    fontSize: '16px',
+    lineHeight: 1.8,
+    maxWidth: '46ch'
   },
   card: {
     width: '100%',
     maxWidth: '420px',
-    background: '#ffffff',
-    borderRadius: '14px',
+    flex: '0 1 420px',
+    background: 'rgba(255,255,255,0.9)',
+    borderRadius: '24px',
     padding: '34px 30px',
-    boxShadow: '0 14px 40px rgba(0,0,0,0.2)'
+    boxShadow: '0 22px 44px rgba(15,23,42,0.08)',
+    border: '1px solid rgba(148, 163, 184, 0.18)',
+    backdropFilter: 'blur(12px)',
   },
   title: {
     margin: 0,
-    textAlign: 'center',
+    textAlign: 'left',
     color: '#0f172a',
-    fontSize: '26px'
+    fontSize: '26px',
+    letterSpacing: '-0.03em'
   },
   subtitle: {
-    textAlign: 'center',
+    textAlign: 'left',
     color: '#64748b',
     marginTop: '8px',
     marginBottom: '24px'
@@ -143,18 +188,20 @@ const styles = {
   },
   input: {
     width: '100%',
-    border: '1px solid #cbd5e1',
-    borderRadius: '8px',
+    border: '1px solid #d6dee9',
+    borderRadius: '12px',
     padding: '11px 12px',
     fontSize: '14px',
     outline: 'none',
-    boxSizing: 'border-box'
+    boxSizing: 'border-box',
+    background: '#fff',
+    color: '#0f172a'
   },
   button: {
     width: '100%',
     marginTop: '8px',
     border: 'none',
-    borderRadius: '8px',
+    borderRadius: '12px',
     padding: '12px',
     color: '#ffffff',
     fontWeight: 700,

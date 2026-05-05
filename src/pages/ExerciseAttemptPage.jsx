@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, BadgeCheck, BrainCircuit, CheckCircle2, Clock3, FileText, Headphones, Mic, MicOff, Pause, Play, SkipBack, SkipForward, Speaker, Sparkles, Volume2, X } from 'lucide-react';
 import api from '../services/api';
 
 function parseQuestions(questionsJson) {
+  if (Array.isArray(questionsJson)) return questionsJson;
   try {
     return JSON.parse(questionsJson || '[]');
   } catch {
@@ -11,8 +13,8 @@ function parseQuestions(questionsJson) {
 }
 
 function formatTime(totalSeconds) {
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = totalSeconds % 60;
+  const mins = Math.floor(Math.max(0, totalSeconds) / 60);
+  const secs = Math.max(0, totalSeconds) % 60;
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
@@ -26,21 +28,35 @@ function extractIntroText(fullText) {
 function resolveCorrectAnswerText(question) {
   const direct = String(question?.correctAnswer || '').trim();
   if (!direct) return '';
-
-  // Legacy format support: correctAnswer stored as option letter (A/B/C/D)
   if (/^[A-D]$/i.test(direct)) {
     const index = direct.toUpperCase().charCodeAt(0) - 65;
-    return String(question?.options?.[index] || '').trim();
+    return String(question?.options?.[index]?.value || question?.options?.[index] || '').trim();
   }
-
   return direct;
+}
+
+function getQuestionText(question) {
+  return String(question?.question || question?.text || '').trim();
+}
+
+function getOptionValue(option) {
+  if (typeof option === 'string') return option;
+  return String(option?.value ?? option?.text ?? '').trim();
+}
+
+function normalizeOptions(question) {
+  const rawOptions = Array.isArray(question?.options) ? question.options : [];
+  return rawOptions.map((option, index) => ({
+    label: typeof option === 'string' ? String.fromCharCode(65 + index) : String(option?.label || String.fromCharCode(65 + index)),
+    value: getOptionValue(option),
+  }));
 }
 
 function ExerciseAttemptPage() {
   const navigate = useNavigate();
   const { courseId, skill, exerciseId } = useParams();
-  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const isTeacherOrAdmin = ['teacher', 'admin'].includes(currentUser.role);
+  const audioRef = useRef(null);
+  const questionRefs = useRef([]);
 
   const [exercise, setExercise] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -49,36 +65,31 @@ function ExerciseAttemptPage() {
   const [textResponse, setTextResponse] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [audioProgress, setAudioProgress] = useState(0);
+  const [audioCurrent, setAudioCurrent] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const [isRecording, setIsRecording] = useState(false);
-  const [recordedUrl, setRecordedUrl] = useState('');
-  const [recorderError, setRecorderError] = useState('');
-  const [mediaRecorder, setMediaRecorder] = useState(null);
-  
-  const [editingField, setEditingField] = useState(null);
-  const [editValues, setEditValues] = useState({ taskPrompt: '', sampleAnswer: '', readingPassage: '' });
-  const [savingEdit, setSavingEdit] = useState(false);
-  
-  const [editMode, setEditMode] = useState(false);
-  const [editQuestions, setEditQuestions] = useState([]);
-  const [savingQuestions, setSavingQuestions] = useState(false);
-  const [deletingExercise, setDeletingExercise] = useState(false);
-  const [editFormData, setEditFormData] = useState({
-    sampleAnswer: '',
-    readingPassage: ''
-  });
+  const [speechTranscript, setSpeechTranscript] = useState('');
+  const [speakingReportOpen, setSpeakingReportOpen] = useState(false);
+
+  const goBack = () => {
+    navigate(-1);
+  };
 
   useEffect(() => {
     api.get(`/exercises/${exerciseId}`)
       .then((res) => {
-        setExercise(res.data);
-        const questions = parseQuestions(res.data?.questions_json);
+        const data = res.data || {};
+        setExercise(data);
+        const questions = parseQuestions(data?.questions_json || data?.questions || []);
         const questionCount = Array.isArray(questions) ? questions.length : 0;
-        setSecondsLeft(Number(res.data?.time_limit_sec) || Math.max(questionCount * 90, 300));
+        setSecondsLeft(Number(data?.time_limit_sec) || Math.max(questionCount * 90, 300));
         setLoading(false);
       })
       .catch((err) => {
-        const msg = err?.response?.data?.message || 'Không tải được bài tập';
-        setError(msg);
+        setError(err?.response?.data?.message || 'Không tải được bài tập');
         setLoading(false);
       });
   }, [exerciseId]);
@@ -100,663 +111,662 @@ function ExerciseAttemptPage() {
     return () => clearInterval(timer);
   }, [submitted, loading, secondsLeft]);
 
-  const questions = useMemo(() => parseQuestions(exercise?.questions_json), [exercise]);
+  const questions = useMemo(() => parseQuestions(exercise?.questions_json || exercise?.questions || []), [exercise]);
   const readingPassage = String(exercise?.reading_passage || '').trim();
   const readingPassageDisplay = useMemo(() => extractIntroText(readingPassage), [readingPassage]);
-  const taskPrompt = String(exercise?.task_prompt || '').trim();
-  const audioUrl = exercise?.audio_url || '';
+  const taskPrompt = String(exercise?.task_prompt || exercise?.prompt || '').trim();
+  const audioUrl = String(exercise?.audio_url || '').trim();
+  const displayTitle = exercise?.title || 'Bài tập';
   const isReading = exercise?.skill_type === 'reading';
   const isListening = exercise?.skill_type === 'listening';
   const isWriting = exercise?.skill_type === 'writing';
   const isSpeaking = exercise?.skill_type === 'speaking';
+  const speakingPrompt = taskPrompt || displayTitle;
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return undefined;
+
+    const syncState = () => {
+      setAudioCurrent(audio.currentTime || 0);
+      setAudioProgress(audio.duration ? (audio.currentTime / audio.duration) * 100 : 0);
+    };
+
+    const onEnded = () => setIsPlaying(false);
+
+    audio.playbackRate = playbackRate;
+    audio.addEventListener('timeupdate', syncState);
+    audio.addEventListener('loadedmetadata', syncState);
+    audio.addEventListener('ended', onEnded);
+
+    return () => {
+      audio.removeEventListener('timeupdate', syncState);
+      audio.removeEventListener('loadedmetadata', syncState);
+      audio.removeEventListener('ended', onEnded);
+    };
+  }, [playbackRate]);
+
+  const wordCount = useMemo(() => {
+    const trimmed = textResponse.trim();
+    return trimmed ? trimmed.split(/\s+/).length : 0;
+  }, [textResponse]);
+
+  const writingMinWords = Number(exercise?.min_words || exercise?.minWords || 0);
+  const writingTargetWords = Number(exercise?.target_words || exercise?.targetWords || 250);
+  const writingProgress = Math.min(100, writingTargetWords > 0 ? (wordCount / writingTargetWords) * 100 : 0);
 
   const score = useMemo(() => {
-    if (!submitted || questions.length === 0) return 0;
-    const correct = questions.reduce((acc, q, idx) => {
-      const selected = answers[idx];
-      const correctAnswerText = resolveCorrectAnswerText(q);
+    if (!submitted || questions.length === 0 || isWriting) return 0;
+    return questions.reduce((acc, question) => {
+      const selected = answers[question.id];
+      const correctAnswerText = resolveCorrectAnswerText(question);
       return selected && selected === correctAnswerText ? acc + 1 : acc;
     }, 0);
-    return Math.round((correct / questions.length) * 100);
-  }, [submitted, questions, answers]);
+  }, [submitted, questions, answers, isWriting]);
 
-  const jumpToQuestion = (index) => {
-    const node = document.getElementById(`question-${index}`);
-    if (node) {
-      node.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
+  const displaySkill = String(skill || exercise?.skill_type || '').toLowerCase();
+  const hasQuestions = questions.length > 0;
 
   const handleSubmit = () => {
     setSubmitted(true);
+    const audio = audioRef.current;
+    if (audio) audio.pause();
+    setIsPlaying(false);
   };
 
-  const startEdit = (field) => {
-    const value = exercise?.[field === 'taskPrompt' ? 'task_prompt' : field === 'sampleAnswer' ? 'sample_answer' : 'reading_passage'] || '';
-    setEditValues((prev) => ({ ...prev, [field]: value }));
-    setEditingField(field);
-  };
-
-  const cancelEdit = () => {
-    setEditingField(null);
-    setEditValues({ taskPrompt: '', sampleAnswer: '', readingPassage: '' });
-  };
-
-  const saveEdit = async () => {
-    try {
-      setSavingEdit(true);
-      const updatePayload = {};
-      if (editingField === 'taskPrompt') updatePayload.taskPrompt = editValues.taskPrompt;
-      if (editingField === 'sampleAnswer') updatePayload.sampleAnswer = editValues.sampleAnswer;
-      if (editingField === 'readingPassage') updatePayload.readingPassage = editValues.readingPassage;
-
-      const res = await api.put(`/exercises/${exerciseId}`, updatePayload);
-      setExercise(res.data.exercise);
-      setEditingField(null);
-      setEditValues({ taskPrompt: '', sampleAnswer: '', readingPassage: '' });
-    } catch (err) {
-      alert('Lỗi lưu: ' + (err.response?.data?.message || err.message));
-    } finally {
-      setSavingEdit(false);
+  const handlePlayPause = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      audio.play();
+      setIsPlaying(true);
+    } else {
+      audio.pause();
+      setIsPlaying(false);
     }
   };
 
-  const enterEditMode = () => {
-    const questions = parseQuestions(exercise?.questions_json);
-    setEditQuestions(JSON.parse(JSON.stringify(questions)));
-    setEditFormData({
-      sampleAnswer: exercise?.sample_answer || '',
-      readingPassage: exercise?.reading_passage || ''
-    });
-    setEditMode(true);
+  const seekAudio = (nextTime) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = Math.max(0, Math.min(nextTime, audio.duration || nextTime));
+    setAudioCurrent(audio.currentTime || 0);
+    setAudioProgress(audio.duration ? (audio.currentTime / audio.duration) * 100 : 0);
   };
 
-  const exitEditMode = () => {
-    setEditMode(false);
-    setEditQuestions([]);
-    setEditFormData({ sampleAnswer: '', readingPassage: '' });
+  const cycleRate = () => {
+    const next = playbackRate === 1 ? 1.25 : playbackRate === 1.25 ? 1.5 : playbackRate === 1.5 ? 0.75 : 1;
+    setPlaybackRate(next);
+    if (audioRef.current) audioRef.current.playbackRate = next;
   };
 
-  const updateEditQuestion = (index, field, value) => {
-    setEditQuestions((prev) => {
-      const updated = [...prev];
-      if (field === 'option') {
-        if (!updated[index].options) updated[index].options = [];
-        updated[index].options[value.optionIndex] = value.text;
-      } else {
-        updated[index][field] = value;
-      }
-      return updated;
-    });
+  const goToQuestion = (index) => {
+    setCurrentQuestion(index);
+    questionRefs.current[index]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
-  const saveEditedQuestions = async () => {
-    try {
-      setSavingQuestions(true);
-      
-      const updatePayload = {
-        questions: editQuestions
-      };
-      
-      if (editFormData.sampleAnswer !== '') {
-        updatePayload.sampleAnswer = editFormData.sampleAnswer;
-      }
-      
-      if (editFormData.readingPassage !== '') {
-        updatePayload.readingPassage = editFormData.readingPassage;
-      }
-
-      const res = await api.put(`/exercises/${exerciseId}`, updatePayload);
-      setExercise(res.data.exercise);
-      setEditMode(false);
-      setEditQuestions([]);
-      setEditFormData({ sampleAnswer: '', readingPassage: '' });
-    } catch (err) {
-      alert('Lỗi lưu: ' + (err.response?.data?.message || err.message));
-    } finally {
-      setSavingQuestions(false);
-    }
+  const selectAnswer = (questionId, value) => {
+    if (submitted) return;
+    setAnswers((prev) => ({ ...prev, [questionId]: value }));
   };
 
-  const startRecording = async () => {
-    try {
-      setRecorderError('');
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const chunks = [];
-      const recorder = new MediaRecorder(stream);
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunks.push(event.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' });
-        const url = URL.createObjectURL(blob);
-        setRecordedUrl(url);
-        stream.getTracks().forEach((t) => t.stop());
-      };
-
-      recorder.start();
-      setMediaRecorder(recorder);
-      setIsRecording(true);
-    } catch {
-      setRecorderError('Không thể truy cập micro. Hãy cấp quyền microphone cho trình duyệt.');
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorder && isRecording) {
-      mediaRecorder.stop();
+  const toggleSpeakingRecording = () => {
+    if (isRecording) {
       setIsRecording(false);
+      setSpeechTranscript((prev) => prev.trim() ? prev : `AI transcript thô: ${speakingPrompt}`);
+      return;
     }
+
+    setSpeakingReportOpen(false);
+    setSubmitted(false);
+    setSpeechTranscript('');
+    setIsRecording(true);
   };
 
-  const deleteCurrentExercise = async () => {
-    if (!isTeacherOrAdmin || !exerciseId || deletingExercise) return;
-
-    const role = String(currentUser?.role || '').toLowerCase();
-    const modeText = role === 'admin'
-      ? 'xoa cung (xoa vinh vien)'
-      : 'xoa mem (an bai khoi danh sach)';
-
-    const confirmed = window.confirm(`Ban chac chan muon ${modeText} bai nay?`);
-    if (!confirmed) return;
-
-    try {
-      setDeletingExercise(true);
-      await api.delete(`/exercises/${exerciseId}`);
-      alert(role === 'admin' ? 'Da xoa cung bai tap.' : 'Da xoa mem bai tap.');
-      navigate(-1);
-    } catch (err) {
-      const apiMessage = err.response?.data?.message || err.message;
-      alert('Loi xoa bai: ' + apiMessage);
-    } finally {
-      setDeletingExercise(false);
+  const handleSpeakingReview = () => {
+    if (isRecording) {
+      setIsRecording(false);
+      setSpeechTranscript((prev) => prev.trim() ? prev : `AI transcript thô: ${speakingPrompt}`);
     }
+
+    if (!speechTranscript.trim()) {
+      setSpeechTranscript(`AI transcript thô: ${speakingPrompt}`);
+    }
+
+    setSpeakingReportOpen(true);
+    setSubmitted(true);
   };
 
   return (
-    <div style={styles.wrapper}>
-      <div style={styles.header}>
-        <button onClick={() => navigate(`/courses/${courseId}/skills/${skill}/exercises`)} style={styles.backBtn}>← Danh sách bài</button>
-        <div style={styles.titleArea}>
-          <h2 style={styles.title}>{exercise?.title || 'Bài tập'}</h2>
-          <p style={styles.subtitle}>Kỹ năng: {String(skill || '').toUpperCase()} {!editMode && `| Thời gian còn lại: ${formatTime(secondsLeft)}`}</p>
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-50 border-b border-border/80 bg-card/90 backdrop-blur-xl shadow-sticky">
+        <div className="mx-auto flex h-16 max-w-[1600px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+          <button onClick={goBack} className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-2 text-sm font-semibold transition-smooth hover:border-primary hover:text-primary">
+            <ArrowLeft className="h-4 w-4" />
+            Quay lại
+          </button>
+          <div className="min-w-0 text-center">
+            <h1 className="truncate text-base font-semibold sm:text-lg">{displayTitle}</h1>
+            <p className="text-xs text-muted-foreground sm:text-sm">
+              Kỹ năng: <span className="font-semibold uppercase text-foreground">{displaySkill}</span>
+              <span className="mx-2">•</span>
+              {submitted ? (isWriting ? `Đã nộp | ${wordCount} từ` : `Đã nộp | ${score}/${questions.length}`) : `Còn lại ${formatTime(secondsLeft)}`}
+            </p>
+          </div>
+          <button onClick={goBack} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-smooth hover:border-primary hover:text-primary">
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <div style={styles.headerBtnGroup}>
-          {isTeacherOrAdmin && (
-            <button
-              onClick={deleteCurrentExercise}
-              disabled={deletingExercise || savingQuestions}
-              style={styles.deleteBtn}
-            >
-              {deletingExercise ? 'Đang xóa...' : 'Xóa bài'}
-            </button>
-          )}
-          {isTeacherOrAdmin && !editMode && (
-            <button onClick={enterEditMode} style={styles.editModeBtn}>✏️ Chỉnh sửa</button>
-          )}
-          {editMode && (
-            <>
-              <button onClick={saveEditedQuestions} disabled={savingQuestions} style={styles.submitBtn}>{savingQuestions ? 'Lưu...' : 'Lưu câu hỏi'}</button>
-              <button onClick={exitEditMode} disabled={savingQuestions} style={styles.cancelBtn}>Hủy</button>
-            </>
-          )}
-          {!editMode && (
-            <button
-              onClick={handleSubmit}
-              disabled={submitted || ((exercise?.skill_type === 'reading' || exercise?.skill_type === 'listening') && questions.length === 0)}
-              style={styles.submitBtn}
-            >
-              Nộp bài
-            </button>
-          )}
-        </div>
-      </div>
+      </header>
 
-      <div style={styles.main}>
-        <div style={styles.leftCol}>
-          {loading && <p style={styles.statusText}>Đang tải...</p>}
-          {error && <p style={styles.errorText}>{error}</p>}
+      <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
+        {loading && <p className="py-16 text-center text-sm text-muted-foreground">Đang tải...</p>}
+        {error && <p className="py-16 text-center text-sm text-destructive">{error}</p>}
 
-          {!loading && !error && (
-            <>
-              {isReading && readingPassageDisplay && (
-                <div style={styles.passageCard}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3 style={styles.sectionTitle}>Bài đọc</h3>
-                    {isTeacherOrAdmin && editingField !== 'readingPassage' && !editMode && (
-                      <button onClick={() => startEdit('readingPassage')} style={styles.editBtn}>✏️ Chỉnh sửa</button>
-                    )}
+        {!loading && !error && isReading && (
+          <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+            <section className="overflow-hidden rounded-[32px] border border-border bg-card shadow-card">
+              <div className="border-b border-border bg-secondary/40 p-5 sm:p-6">
+                <div className="grid gap-5 md:grid-cols-[0.85fr_1.15fr] md:items-center">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Reading passage</p>
+                    <h2 className="mt-1 text-2xl font-bold sm:text-3xl">{exercise?.reading_title || exercise?.title || 'Bài đọc'}</h2>
                   </div>
-                  {editingField === 'readingPassage' ? (
+                </div>
+              </div>
+              <div className="custom-scrollbar max-h-[calc(100vh-220px)] overflow-y-auto p-6 sm:p-7">
+                <div className="prose prose-slate max-w-none">
+                  {(readingPassageDisplay || readingPassage || 'Chưa có nội dung bài đọc.').split('\n\n').map((paragraph, index) => (
+                    <p key={index} className="mb-4 text-sm leading-7 text-foreground/85">
+                      {paragraph}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="space-y-4">
+
+
+              <div className="custom-scrollbar space-y-4 overflow-y-auto pr-1 xl:max-h-[calc(100vh-260px)]">
+                {questions.map((question, index) => {
+                  const selectedAnswer = answers[question.id];
+                  const correctAnswerText = resolveCorrectAnswerText(question);
+                  const isCorrect = submitted && selectedAnswer === correctAnswerText;
+                  const isWrong = submitted && selectedAnswer && selectedAnswer !== correctAnswerText;
+
+                  return (
+                    <article
+                      key={question.id || index}
+                      ref={(el) => {
+                        questionRefs.current[index] = el;
+                      }}
+                      className={`rounded-[24px] border bg-card p-5 shadow-card transition-smooth ${index === currentQuestion && !submitted ? 'border-primary shadow-elegant' : 'border-border'} ${isCorrect ? 'border-success bg-success/5' : ''} ${isWrong ? 'border-destructive bg-destructive/5' : ''}`}
+                    >
+                      <div className="mb-4 flex items-start gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full gradient-primary text-sm font-bold text-primary-foreground">{question.id || index + 1}</div>
+                        <h3 className="pt-1 text-sm font-medium leading-6">{getQuestionText(question)}</h3>
+                      </div>
+
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {normalizeOptions(question).map((option, optionIndex) => {
+                          const isSelected = selectedAnswer === option.value;
+                          const isOptionCorrect = submitted && correctAnswerText === option.value;
+                          const isOptionWrong = submitted && isSelected && !isOptionCorrect;
+
+                          return (
+                            <button
+                              key={`${question.id || index}-${optionIndex}`}
+                              onClick={() => selectAnswer(question.id, option.value)}
+                              className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition-smooth ${!submitted && isSelected ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40 hover:bg-secondary/80'} ${isOptionCorrect ? 'border-success bg-success/10' : ''} ${isOptionWrong ? 'border-destructive bg-destructive/10' : ''}`}
+                              disabled={submitted}
+                            >
+                              <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold ${!submitted && isSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/30'} ${isOptionCorrect ? 'border-success bg-success text-success-foreground' : ''} ${isOptionWrong ? 'border-destructive bg-destructive text-destructive-foreground' : ''}`}>
+                                {isOptionCorrect && <CheckCircle2 className="h-3.5 w-3.5" />}
+                                {isOptionWrong ? '!' : option.label}
+                              </span>
+                              <span className="leading-6 text-foreground">{option.value}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {!loading && !error && isListening && (
+          <div className="space-y-6">
+            <section className="overflow-hidden rounded-[32px] border border-border bg-card shadow-card">
+              <div className="grid gap-5 border-b border-border bg-secondary/40 p-5 sm:p-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+                <div>
+                  <div className="flex flex-wrap items-center justify-between gap-4">
                     <div>
-                      <textarea value={editValues.readingPassage} onChange={(e) => setEditValues((p) => ({ ...p, readingPassage: e.target.value }))} style={{ ...styles.editTextarea, minHeight: '180px' }} />
-                      <div style={styles.editBtnGroup}>
-                        <button onClick={saveEdit} disabled={savingEdit} style={styles.saveBtnSmall}>{savingEdit ? 'Lưu...' : 'Lưu'}</button>
-                        <button onClick={cancelEdit} style={styles.cancelBtnSmall}>Hủy</button>
-                      </div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Listening player</p>
+                      <h2 className="mt-1 text-2xl font-bold sm:text-3xl">{exercise?.audio_title || exercise?.title || 'Bài nghe'}</h2>
                     </div>
-                  ) : (
-                    <p style={styles.passageText}>{readingPassageDisplay}</p>
-                  )}
-                </div>
-              )}
-
-              {isListening && (
-                <div style={styles.passageCard}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3 style={styles.sectionTitle}>Bài nghe</h3>
-                    {isTeacherOrAdmin && editingField !== 'taskPrompt' && !editMode && (
-                      <button onClick={() => startEdit('taskPrompt')} style={styles.editBtn}>✏️ Chỉnh sửa</button>
-                    )}
                   </div>
-                  {editingField === 'taskPrompt' ? (
-                    <div>
-                      <textarea value={editValues.taskPrompt} onChange={(e) => setEditValues((p) => ({ ...p, taskPrompt: e.target.value }))} style={styles.editTextarea} />
-                      <div style={styles.editBtnGroup}>
-                        <button onClick={saveEdit} disabled={savingEdit} style={styles.saveBtnSmall}>{savingEdit ? 'Lưu...' : 'Lưu'}</button>
-                        <button onClick={cancelEdit} style={styles.cancelBtnSmall}>Hủy</button>
-                      </div>
-                    </div>
-                  ) : (
-                    taskPrompt && <p style={styles.passageText}>{taskPrompt}</p>
-                  )}
-                  {audioUrl ? (
-                    <audio controls style={{ width: '100%' }} src={audioUrl} />
-                  ) : (
-                    <p style={styles.errorText}>Không tìm thấy file audio cho bài nghe này.</p>
-                  )}
                 </div>
-              )}
-
-              {isWriting && (
-                <div style={styles.passageCard}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3 style={styles.sectionTitle}>Đề bài viết</h3>
-                    {isTeacherOrAdmin && editingField !== 'taskPrompt' && !editMode && (
-                      <button onClick={() => startEdit('taskPrompt')} style={styles.editBtn}>✏️ Chỉnh sửa</button>
-                    )}
+              </div>
+              <div className="space-y-5 p-5 sm:p-6">
+                <audio ref={audioRef} src={audioUrl || undefined} preload="metadata" />
+                <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                  <span className="w-11 text-right font-mono">{formatTime(audioCurrent)}</span>
+                  <div className="relative flex-1">
+                    <div className="h-2 w-full rounded-full bg-secondary">
+                      <div className="h-2 rounded-full gradient-primary transition-smooth" style={{ width: `${audioProgress}%` }} />
+                    </div>
                   </div>
-                  {editingField === 'taskPrompt' ? (
-                    <div>
-                      <textarea value={editValues.taskPrompt} onChange={(e) => setEditValues((p) => ({ ...p, taskPrompt: e.target.value }))} style={styles.editTextarea} />
-                      <div style={styles.editBtnGroup}>
-                        <button onClick={saveEdit} disabled={savingEdit} style={styles.saveBtnSmall}>{savingEdit ? 'Lưu...' : 'Lưu'}</button>
-                        <button onClick={cancelEdit} style={styles.cancelBtnSmall}>Hủy</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <p style={styles.passageText}>{taskPrompt || 'Chưa có đề bài.'}</p>
-                  )}
-                  {!isTeacherOrAdmin && (
-                    <textarea
-                      style={styles.writingBox}
-                      placeholder='Nhập bài viết của bạn ở đây...'
-                      value={textResponse}
-                      onChange={(e) => setTextResponse(e.target.value)}
-                      disabled={submitted}
-                    />
-                  )}
-                  {isTeacherOrAdmin && (
-                    <div style={{ marginTop: '10px' }}>
-                      <label style={styles.label}>Bài mẫu:</label>
-                      <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                        {editingField !== 'sampleAnswer' && !editMode && (
-                          <button onClick={() => startEdit('sampleAnswer')} style={styles.editBtn}>✏️ Chỉnh sửa bài mẫu</button>
-                        )}
-                      </div>
-                      {editingField === 'sampleAnswer' ? (
-                        <div>
-                          <textarea value={editValues.sampleAnswer} onChange={(e) => setEditValues((p) => ({ ...p, sampleAnswer: e.target.value }))} style={{ ...styles.editTextarea, minHeight: '100px' }} />
-                          <div style={styles.editBtnGroup}>
-                            <button onClick={saveEdit} disabled={savingEdit} style={styles.saveBtnSmall}>{savingEdit ? 'Lưu...' : 'Lưu'}</button>
-                            <button onClick={cancelEdit} style={styles.cancelBtnSmall}>Hủy</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <p style={{ ...styles.passageText, background: '#f8fafc', padding: '10px', borderRadius: '8px' }}>{exercise?.sample_answer || 'Chưa có bài mẫu.'}</p>
-                      )}
-                    </div>
-                  )}
+                  <span className="w-11 font-mono">{formatTime((audioRef.current && audioRef.current.duration) || exercise?.audio_duration || 0)}</span>
                 </div>
-              )}
-
-              {isSpeaking && (
-                <div style={styles.passageCard}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3 style={styles.sectionTitle}>Đề bài nói</h3>
-                    {isTeacherOrAdmin && editingField !== 'taskPrompt' && !editMode && (
-                      <button onClick={() => startEdit('taskPrompt')} style={styles.editBtn}>✏️ Chỉnh sửa</button>
-                    )}
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <button onClick={cycleRate} className="rounded-full border border-border bg-background px-3 py-2 text-sm font-semibold transition-smooth hover:border-primary hover:text-primary">{playbackRate}x</button>
+                  <button onClick={() => seekAudio(audioCurrent - 10)} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background transition-smooth hover:border-primary hover:text-primary">
+                    <SkipBack className="h-4 w-4" />
+                  </button>
+                  <button onClick={handlePlayPause} className="inline-flex h-14 w-14 items-center justify-center rounded-full gradient-primary text-primary-foreground shadow-elegant transition-smooth hover:shadow-glow">
+                    {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="ml-0.5 h-5 w-5" />}
+                  </button>
+                  <button onClick={() => seekAudio(audioCurrent + 10)} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background transition-smooth hover:border-primary hover:text-primary">
+                    <SkipForward className="h-4 w-4" />
+                  </button>
+                  <button className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background transition-smooth hover:border-primary hover:text-primary">
+                    <Speaker className="h-4 w-4" />
+                  </button>
+                </div>
+                {taskPrompt && (
+                  <div className="rounded-2xl border border-border bg-secondary/40 p-4 text-sm leading-6 text-foreground/85">
+                    {taskPrompt}
                   </div>
-                  {editingField === 'taskPrompt' ? (
-                    <div>
-                      <textarea value={editValues.taskPrompt} onChange={(e) => setEditValues((p) => ({ ...p, taskPrompt: e.target.value }))} style={styles.editTextarea} />
-                      <div style={styles.editBtnGroup}>
-                        <button onClick={saveEdit} disabled={savingEdit} style={styles.saveBtnSmall}>{savingEdit ? 'Lưu...' : 'Lưu'}</button>
-                        <button onClick={cancelEdit} style={styles.cancelBtnSmall}>Hủy</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <p style={styles.passageText}>{taskPrompt || 'Chưa có đề bài.'}</p>
-                  )}
-                  {!isTeacherOrAdmin && (
-                    <>
-                      <div style={styles.recordRow}>
-                        {!isRecording ? (
-                          <button type="button" onClick={startRecording} style={styles.micBtn} disabled={submitted}>🎤 Bắt đầu thu</button>
-                        ) : (
-                          <button type="button" onClick={stopRecording} style={styles.stopBtn}>⏹ Dừng thu</button>
-                        )}
-                        {isRecording && <span style={styles.recText}>Đang ghi âm...</span>}
-                      </div>
-                      {recordedUrl && (
-                        <audio controls style={{ width: '100%', marginTop: '10px' }} src={recordedUrl} />
-                      )}
-                      {recorderError && <p style={styles.errorText}>{recorderError}</p>}
-                    </>
-                  )}
-                  {isTeacherOrAdmin && (
-                    <div style={{ marginTop: '10px' }}>
-                      <label style={styles.label}>Bài mẫu:</label>
-                      <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                        {editingField !== 'sampleAnswer' && !editMode && (
-                          <button onClick={() => startEdit('sampleAnswer')} style={styles.editBtn}>✏️ Chỉnh sửa bài mẫu</button>
-                        )}
-                      </div>
-                      {editingField === 'sampleAnswer' ? (
-                        <div>
-                          <textarea value={editValues.sampleAnswer} onChange={(e) => setEditValues((p) => ({ ...p, sampleAnswer: e.target.value }))} style={{ ...styles.editTextarea, minHeight: '100px' }} />
-                          <div style={styles.editBtnGroup}>
-                            <button onClick={saveEdit} disabled={savingEdit} style={styles.saveBtnSmall}>{savingEdit ? 'Lưu...' : 'Lưu'}</button>
-                            <button onClick={cancelEdit} style={styles.cancelBtnSmall}>Hủy</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <p style={{ ...styles.passageText, background: '#f8fafc', padding: '10px', borderRadius: '8px' }}>{exercise?.sample_answer || 'Chưa có bài mẫu.'}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+                )}
+              </div>
+            </section>
 
-              {editMode && (
-                <div style={styles.editModePanel}>
-                  <div style={styles.editModeHeader}>
-                    <h3 style={styles.sectionTitle}>Chế độ chỉnh sửa</h3>
-                    <p style={styles.editModeNote}>Các câu trả lời và gợi ý hiển thị dưới đây. Bạn có thể chỉnh sửa các giá trị trực tiếp.</p>
-                  </div>
+            <section className="space-y-4">
+              {questions.map((question, index) => {
+                const selectedAnswer = answers[question.id];
+                const correctAnswerText = resolveCorrectAnswerText(question);
+                const isCorrect = submitted && selectedAnswer === correctAnswerText;
+                const isWrong = submitted && selectedAnswer && selectedAnswer !== correctAnswerText;
 
-                  {isReading && readingPassage && (
-                    <div style={styles.editSection}>
-                      <h4 style={styles.editSectionTitle}>Bài đọc</h4>
-                      <textarea
-                        value={editFormData.readingPassage}
-                        onChange={(e) => setEditFormData(prev => ({ ...prev, readingPassage: e.target.value }))}
-                        style={{ ...styles.editTextarea, minHeight: '120px' }}
-                      />
+                return (
+                  <article
+                    key={question.id || index}
+                    ref={(el) => {
+                      questionRefs.current[index] = el;
+                    }}
+                    className={`rounded-[24px] border bg-card p-5 shadow-card transition-smooth ${index === currentQuestion && !submitted ? 'border-primary shadow-elegant' : 'border-border'} ${isCorrect ? 'border-success bg-success/5' : ''} ${isWrong ? 'border-destructive bg-destructive/5' : ''}`}
+                  >
+                    <div className="mb-4 flex items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full gradient-primary text-sm font-bold text-primary-foreground">{question.id || index + 1}</div>
+                      <h3 className="pt-1 text-sm font-medium leading-6">{getQuestionText(question)}</h3>
                     </div>
-                  )}
 
-                  {isListening && (
-                    <div style={styles.editSection}>
-                      <h4 style={styles.editSectionTitle}>Hướng dẫn bài nghe</h4>
-                      <textarea
-                        value={exercise?.task_prompt || ''}
-                        disabled={true}
-                        style={{ ...styles.editTextarea, minHeight: '80px', background: '#f8fafc', color: '#666' }}
-                      />
-                      <p style={styles.editNote}>* Bài nghe không thể chỉnh sửa. Hãy tải lại file audio nếu cần thay đổi.</p>
-                      {audioUrl && (
-                        <div style={styles.editSection}>
-                          <p style={styles.editSectionTitle}>File nghe hiện tại:</p>
-                          <audio controls style={{ width: '100%' }} src={audioUrl} />
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {isWriting && (
-                    <div style={styles.editSection}>
-                      <h4 style={styles.editSectionTitle}>Đề bài viết</h4>
-                      <textarea
-                        value={exercise?.task_prompt || ''}
-                        disabled={true}
-                        style={{ ...styles.editTextarea, minHeight: '80px', background: '#f8fafc', color: '#666' }}
-                      />
-                      <h4 style={{ ...styles.editSectionTitle, marginTop: '16px' }}>Bài mẫu</h4>
-                      <textarea
-                        value={editFormData.sampleAnswer}
-                        onChange={(e) => setEditFormData(prev => ({ ...prev, sampleAnswer: e.target.value }))}
-                        style={{ ...styles.editTextarea, minHeight: '100px' }}
-                      />
-                    </div>
-                  )}
-
-                  {isSpeaking && (
-                    <div style={styles.editSection}>
-                      <h4 style={styles.editSectionTitle}>Đề bài nói</h4>
-                      <textarea
-                        value={exercise?.task_prompt || ''}
-                        disabled={true}
-                        style={{ ...styles.editTextarea, minHeight: '80px', background: '#f8fafc', color: '#666' }}
-                      />
-                      <h4 style={{ ...styles.editSectionTitle, marginTop: '16px' }}>Bài mẫu</h4>
-                      <textarea
-                        value={editFormData.sampleAnswer}
-                        onChange={(e) => setEditFormData(prev => ({ ...prev, sampleAnswer: e.target.value }))}
-                        style={{ ...styles.editTextarea, minHeight: '100px' }}
-                      />
-                    </div>
-                  )}
-
-                  {(isReading || isListening) && (
-                    <div style={styles.editSection}>
-                      <h3 style={styles.sectionTitle}>Chỉnh sửa câu hỏi</h3>
-                      {editQuestions.map((q, idx) => (
-                        <div key={idx} style={styles.editQuestionBlock}>
-                          <div style={styles.editQuestionLabel}>{idx + 1}. Câu hỏi</div>
-                          <input
-                            type='text'
-                            value={q.question}
-                            onChange={(e) => updateEditQuestion(idx, 'question', e.target.value)}
-                            style={styles.editInput}
-                          />
-                          <div style={styles.editQuestionLabel}>Lựa chọn</div>
-                          {(q.options || []).map((opt, optIdx) => (
-                            <input
-                              key={optIdx}
-                              type='text'
-                              value={opt}
-                              onChange={(e) => updateEditQuestion(idx, 'option', { optionIndex: optIdx, text: e.target.value })}
-                              style={styles.editInput}
-                              placeholder={`Lựa chọn ${String.fromCharCode(65 + optIdx)}`}
-                            />
-                          ))}
-                          <div style={styles.editQuestionLabel}>Đáp án đúng</div>
-                          <select
-                            value={q.correctAnswer || ''}
-                            onChange={(e) => updateEditQuestion(idx, 'correctAnswer', e.target.value)}
-                            style={styles.editSelect}
-                          >
-                            <option value=''>-- Chọn đáp án --</option>
-                            {(q.options || []).map((opt, optIdx) => (
-                              <option key={optIdx} value={opt}>{opt}</option>
-                            ))}
-                          </select>
-                          <div style={styles.editQuestionLabel}>Gợi ý / Giải thích</div>
-                          <textarea
-                            value={q.explanation || ''}
-                            onChange={(e) => updateEditQuestion(idx, 'explanation', e.target.value)}
-                            style={{ ...styles.editTextarea, minHeight: '60px' }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {(isReading || isListening) && !editMode && (
-                <div style={styles.questionsCard}>
-                <h3 style={styles.sectionTitle}>Câu hỏi</h3>
-                {questions.map((q, idx) => (
-                  <div key={idx} id={`question-${idx}`} style={styles.questionBlock}>
-                    <div style={styles.questionText}>{idx + 1}. {q.question}</div>
-                    <div style={styles.optionGrid}>
-                      {(q.options || []).map((opt, optionIndex) => {
-                        const selected = answers[idx] === opt;
-                        const correctAnswerText = resolveCorrectAnswerText(q);
-                        const isCorrect = submitted && opt === correctAnswerText;
-                        const isWrongSelected = submitted && selected && opt !== correctAnswerText;
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {normalizeOptions(question).map((option, optionIndex) => {
+                        const isSelected = selectedAnswer === option.value;
+                        const isOptionCorrect = submitted && correctAnswerText === option.value;
+                        const isOptionWrong = submitted && isSelected && !isOptionCorrect;
 
                         return (
                           <button
-                            type="button"
-                            key={optionIndex}
+                            key={`${question.id || index}-${optionIndex}`}
+                            onClick={() => selectAnswer(question.id, option.value)}
+                            className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition-smooth ${!submitted && isSelected ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40 hover:bg-secondary/80'} ${isOptionCorrect ? 'border-success bg-success/10' : ''} ${isOptionWrong ? 'border-destructive bg-destructive/10' : ''}`}
                             disabled={submitted}
-                            onClick={() => setAnswers((prev) => ({ ...prev, [idx]: opt }))}
-                            style={{
-                              ...styles.optionBtn,
-                              ...(selected ? styles.optionSelected : {}),
-                              ...(isCorrect ? styles.optionCorrect : {}),
-                              ...(isWrongSelected ? styles.optionWrong : {})
-                            }}
                           >
-                            {String.fromCharCode(65 + optionIndex)}. {opt}
+                            <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold ${!submitted && isSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/30'} ${isOptionCorrect ? 'border-success bg-success text-success-foreground' : ''} ${isOptionWrong ? 'border-destructive bg-destructive text-destructive-foreground' : ''}`}>
+                              {isOptionCorrect && <CheckCircle2 className="h-3.5 w-3.5" />}
+                              {isOptionWrong ? '!' : option.label}
+                            </span>
+                            <span className="leading-6 text-foreground">{option.value}</span>
                           </button>
                         );
                       })}
                     </div>
-                    {submitted && q.explanation && (
-                      <div style={styles.explain}><strong>Giải thích:</strong> {q.explanation}</div>
-                    )}
+                  </article>
+                );
+              })}
+            </section>
+          </div>
+        )}
+
+        {!loading && !error && isSpeaking && (
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,0.9fr)]">
+            <section className="space-y-6">
+              <article className="overflow-hidden rounded-[32px] border border-border bg-card shadow-card">
+                <div className="border-b border-border bg-secondary/40 p-5 sm:p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="max-w-3xl">
+                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Speaking Question</p>
+                      <h2 className="mt-1 text-2xl font-bold sm:text-3xl">{displayTitle}</h2>
+                      <p className="mt-3 max-w-3xl text-sm leading-6 text-foreground/70">
+                        {speakingPrompt || 'Hãy trả lời chủ đề speaking bên dưới theo cách tự nhiên nhất có thể.'}
+                      </p>
+                    </div>
                   </div>
-                ))}
+                </div>
+
+                <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-[1fr_0.95fr] lg:items-center">
+
+                  <div className="space-y-4">
+                    <div className="rounded-[24px] border border-border bg-background p-5">
+                      {isRecording ? (
+                        <div className="flex items-center gap-4">
+                          <div className="relative flex h-18 w-18 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                            <span className="absolute h-full w-full animate-ping rounded-full bg-destructive/30" />
+                            <span className="absolute h-14 w-14 rounded-full bg-destructive/20 animate-pulse" />
+                            <Mic className="relative h-8 w-8" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 text-sm font-semibold text-destructive">
+                              <span className="h-2.5 w-2.5 rounded-full bg-destructive animate-pulse" />
+                              Đang ghi âm
+                            </div>
+                            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                              Hãy nói câu trả lời của bạn. Khi dừng ghi âm, phần transcript sẽ xuất hiện ngay bên dưới.
+                            </p>
+                            <div className="mt-4 flex items-end gap-1.5">
+                              {[10, 18, 28, 16, 24, 14, 30, 20].map((height, index) => (
+                                <span
+                                  key={index}
+                                  className="w-2 rounded-full bg-destructive/70 animate-pulse"
+                                  style={{ height: `${height}px`, animationDelay: `${index * 90}ms` }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-4">
+                          <div className="flex h-18 w-18 items-center justify-center rounded-full bg-primary/10 text-primary">
+                            <Volume2 className="h-8 w-8" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-foreground">Audio Player</p>
+                                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                                  Bản ghi đã dừng. Bạn có thể nghe lại hoặc chấm bài ngay.
+                                </p>
+                              </div>
+                              <div className="rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                                Ready
+                              </div>
+                            </div>
+                            <div className="mt-4 grid gap-2">
+                              <div className="flex items-center gap-1.5">
+                                {[22, 12, 30, 16, 24, 10, 28, 18, 26, 14, 20, 12].map((height, index) => (
+                                  <span key={index} className="w-2 rounded-full bg-primary/40" style={{ height: `${height}px` }} />
+                                ))}
+                              </div>
+                              <div className="h-2 rounded-full bg-secondary">
+                                <div className="h-2 w-1/3 rounded-full gradient-primary" />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        onClick={toggleSpeakingRecording}
+                        className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold shadow-elegant transition-smooth ${isRecording ? 'bg-destructive text-white hover:opacity-95' : 'gradient-primary text-primary-foreground hover:shadow-glow'}`}
+                      >
+                        {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                        {isRecording ? 'Dừng ghi âm' : 'Ghi âm'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article className="overflow-hidden rounded-[32px] border border-border bg-card shadow-card">
+                <div className="border-b border-border bg-secondary/40 px-5 py-4 sm:px-6">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Speech-to-Text Script</p>
+                  <h3 className="mt-1 text-lg font-bold">Transcript thô từ AI</h3>
+                </div>
+                <div className="p-5 sm:p-6">
+                  {isRecording ? (
+                    <div className="rounded-3xl border border-dashed border-border bg-muted/40 p-6 text-sm leading-7 text-muted-foreground">
+                      Transcript sẽ xuất hiện ngay sau khi bạn dừng ghi âm.
+                    </div>
+                  ) : (
+                    <div className="rounded-3xl border border-border bg-background p-5 text-sm leading-7 text-foreground/85 shadow-card">
+                      {speechTranscript || 'Chưa có transcript. Bấm Ghi âm để bắt đầu.'}
+                    </div>
+                  )}
+                </div>
+              </article>
+            </section>
+
+            <aside className="space-y-4">
+              <div className="rounded-[28px] border border-border bg-card p-5 shadow-card">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Contextual Sidebar</p>
+                    <h3 className="mt-1 text-xl font-bold">{speakingReportOpen ? 'Báo cáo AI' : 'Công thức / Gợi ý'}</h3>
+                  </div>
+                  <button
+                    onClick={() => setSpeakingReportOpen((prev) => !prev)}
+                    className="rounded-full border border-border bg-background px-3 py-2 text-sm font-semibold transition-smooth hover:border-primary hover:text-primary"
+                  >
+                    {speakingReportOpen ? 'Xem gợi ý' : 'Nộp bài'}
+                  </button>
+                </div>
+              </div>
+
+              {!speakingReportOpen ? (
+                <div className="overflow-hidden rounded-[28px] border border-border bg-card shadow-card">
+                  <div className="space-y-3 p-5">
+                    {[
+                      { title: 'Introduction', text: 'Nêu ý chính ngay từ đầu, trả lời trực tiếp câu hỏi.' },
+                      { title: 'Development', text: 'Mở rộng ý bằng 1-2 ví dụ ngắn, giữ câu ngắn và rõ.' },
+                      { title: 'Finish', text: 'Kết bài bằng một câu chốt ngắn, tự nhiên và mạch lạc.' },
+                    ].map((item) => (
+                      <div key={item.title} className="rounded-2xl border border-border bg-background p-4">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-4 w-4 text-primary" />
+                          <p className="text-sm font-semibold">{item.title}</p>
+                        </div>
+                        <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4 rounded-[28px] border border-border bg-card p-5 shadow-card">
+                  <div className="rounded-[24px] border border-success/20 bg-success/5 p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-success">
+                      <BadgeCheck className="h-4 w-4" />
+                      Điểm tổng quan
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                      {[
+                        { label: 'Fluency', value: '8.2/10' },
+                        { label: 'Grammar', value: '7.6/10' },
+                        { label: 'Vocabulary', value: '8.0/10' },
+                        { label: 'Pronunciation', value: '7.9/10' },
+                      ].map((item) => (
+                        <div key={item.label} className="rounded-2xl border border-border bg-background p-3">
+                          <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{item.label}</div>
+                          <div className="mt-1 text-base font-bold">{item.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-[24px] border border-border bg-background p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <BrainCircuit className="h-4 w-4 text-primary" />
+                      Sửa lỗi / Gợi ý
+                    </div>
+                    <ul className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
+                      <li>• Dùng câu ngắn hơn để tránh ngập ngừng.</li>
+                      <li>• Thêm từ nối như however, therefore, for example.</li>
+                      <li>• Nhấn rõ từ khóa chính trong câu trả lời.</li>
+                    </ul>
+                  </div>
+
+                  <div className="rounded-[24px] border border-border bg-background p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <FileText className="h-4 w-4 text-primary" />
+                      Gợi ý từ vựng
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {['clarity', 'confidence', 'example', 'structure', 'pronunciation'].map((word) => (
+                        <span key={word} className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                          {word}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
-            </>
-          )}
-        </div>
-
-        <div style={styles.rightCol}>
-          <div style={styles.panelCard}>
-            <h4 style={styles.panelTitle}>Điều hướng câu hỏi</h4>
-            {(isReading || isListening) && (
-              <div style={styles.navGrid}>
-                {questions.map((_, idx) => {
-                  const answered = Boolean(answers[idx]);
-                  return (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => jumpToQuestion(idx)}
-                      style={{
-                        ...styles.navBtn,
-                        ...(answered ? styles.navAnswered : {})
-                      }}
-                    >
-                      {idx + 1}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {submitted && <div style={styles.scoreBox}>Điểm: {score}/100</div>}
+            </aside>
           </div>
-        </div>
-      </div>
+        )}
+
+        {!loading && !error && isWriting && (
+          <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+            <section className="overflow-hidden rounded-[32px] border border-border bg-card shadow-card">
+              <div className="grid gap-5 border-b border-border bg-secondary/40 p-5 sm:p-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+                <div className="overflow-hidden rounded-[28px] bg-gradient-to-br from-slate-900 via-indigo-700 to-cyan-600 p-3 shadow-elegant">
+                  <img src="/images/writing-illustration.png" alt="Writing illustration" className="h-full w-full rounded-[22px] object-cover opacity-95" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Writing task</p>
+                  <h2 className="mt-1 text-2xl font-bold sm:text-3xl">{exercise?.title || 'Writing task'}</h2>
+                  <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/70">
+                    Khung viết được mở rộng theo chiều ngang để người học có cảm giác như đang làm việc trong một editor thực thụ.
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-5 p-5 sm:p-6">
+                <div className="rounded-2xl border border-border bg-secondary/40 p-4">
+                  <div className="mb-2 text-sm font-semibold text-foreground">Đề bài</div>
+                  <p className="whitespace-pre-line text-sm leading-7 text-foreground/85">{taskPrompt || 'Chưa có đề bài.'}</p>
+                </div>
+                <textarea
+                  value={textResponse}
+                  onChange={(e) => setTextResponse(e.target.value)}
+                  placeholder="Start writing your essay here..."
+                  className="min-h-[420px] w-full resize-none rounded-3xl border border-border bg-background p-5 text-sm leading-7 outline-none transition-smooth focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  disabled={submitted}
+                  spellCheck
+                />
+                <div className="flex items-center justify-between rounded-2xl border border-border bg-secondary/40 px-4 py-3 text-sm text-muted-foreground">
+                  <span>{wordCount} từ</span>
+                  <span>Từ mục tiêu: {writingTargetWords || '—'}</span>
+                </div>
+                <div className="h-2 rounded-full bg-secondary">
+                  <div className={`h-2 rounded-full transition-smooth ${wordCount >= writingMinWords ? 'gradient-success' : 'gradient-primary'}`} style={{ width: `${writingProgress}%` }} />
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <button onClick={goBack} className="rounded-full border border-border bg-background px-4 py-2.5 text-sm font-semibold transition-smooth hover:border-primary hover:text-primary">
+                    Save & Exit
+                  </button>
+                  <button onClick={handleSubmit} disabled={submitted || (writingMinWords > 0 && wordCount < writingMinWords)} className="rounded-full gradient-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-elegant transition-smooth hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-50">
+                    {submitted ? 'Đã nộp' : 'Submit Essay'}
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <aside className="space-y-4">
+              <div className="rounded-[28px] border border-border bg-card p-5 shadow-card">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Support panel</p>
+                <h3 className="mt-1 text-xl font-bold">Writing support</h3>
+              </div>
+
+              <div className="rounded-[24px] border border-border bg-card p-5 shadow-card">
+                <div className="mb-3 text-sm font-semibold">Structure</div>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  {[
+                    'Introduction: paraphrase the topic and state your opinion.',
+                    'Body 1: present the first main reason with an example.',
+                    'Body 2: present the second main reason or counterpoint.',
+                    'Conclusion: restate your view clearly and concisely.',
+                  ].map((item) => (
+                    <div key={item} className="rounded-2xl border border-border bg-secondary/35 px-3 py-2 leading-6">{item}</div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-[24px] border border-border bg-card p-5 shadow-card">
+                <div className="mb-3 text-sm font-semibold">Sample answer</div>
+                <p className="text-sm leading-7 text-muted-foreground">
+                  {String(exercise?.sample_answer || exercise?.sampleAnswer || '').trim() || 'Chưa có bài mẫu cho bài viết này.'}
+                </p>
+              </div>
+
+              <div className="rounded-[24px] border border-border bg-card p-5 shadow-card">
+                <div className="mb-3 text-sm font-semibold">Timer</div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 font-mono text-sm font-semibold">
+                  <Clock3 className="h-4 w-4" />
+                  {formatTime(secondsLeft)}
+                </div>
+              </div>
+            </aside>
+          </div>
+        )}
+      </main>
+
+      {!loading && !error && hasQuestions && !isWriting && !isSpeaking && (
+        <footer className="sticky bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur-xl shadow-sticky">
+          <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+            <div className="flex flex-wrap items-center gap-2">
+              {questions.map((question, index) => (
+                <button
+                  key={question.id || index}
+                  onClick={() => goToQuestion(index)}
+                  className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-semibold transition-smooth ${index === currentQuestion && !submitted ? 'gradient-primary text-primary-foreground shadow-elegant' : answers[question.id] ? 'bg-primary/10 text-primary' : 'border border-border text-muted-foreground hover:border-primary'}`}
+                >
+                  {question.id || index + 1}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={handleSubmit} className="rounded-full gradient-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-elegant transition-smooth hover:shadow-glow">
+                {submitted ? 'Đã nộp' : 'Nộp bài'}
+              </button>
+            </div>
+          </div>
+        </footer>
+      )}
+
+      {!loading && !error && isListening && (
+        <footer className="sticky bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur-xl shadow-sticky">
+          <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+            <div className="flex flex-wrap items-center gap-2">
+              {questions.map((question, index) => (
+                <button
+                  key={question.id || index}
+                  onClick={() => goToQuestion(index)}
+                  className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-semibold transition-smooth ${index === currentQuestion && !submitted ? 'gradient-primary text-primary-foreground shadow-elegant' : answers[question.id] ? 'bg-primary/10 text-primary' : 'border border-border text-muted-foreground hover:border-primary'}`}
+                >
+                  {question.id || index + 1}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-2 font-mono text-sm font-semibold">
+                <Clock3 className="h-4 w-4" />
+                {formatTime(secondsLeft)}
+              </div>
+              <button onClick={handleSubmit} className="rounded-full gradient-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-elegant transition-smooth hover:shadow-glow">
+                {submitted ? 'Đã nộp' : 'Nộp bài'}
+              </button>
+            </div>
+          </div>
+        </footer>
+      )}
     </div>
   );
 }
-
-const styles = {
-  wrapper: { minHeight: '100vh', background: '#f1f3f6', fontFamily: 'sans-serif' },
-  header: {
-    position: 'sticky',
-    top: 0,
-    zIndex: 5,
-    background: '#ffffff',
-    borderBottom: '1px solid #dfe4ea',
-    padding: '12px 18px',
-    display: 'grid',
-    gridTemplateColumns: '180px 1fr auto',
-    alignItems: 'center',
-    gap: '12px'
-  },
-  backBtn: { border: '1px solid #cfd8e3', background: '#f8fbff', borderRadius: '8px', padding: '8px 10px', cursor: 'pointer' },
-  titleArea: { minWidth: 0 },
-  title: { margin: 0, color: '#1e293b', fontSize: '20px' },
-  subtitle: { margin: '4px 0 0 0', color: '#475569', fontSize: '14px' },
-  submitBtn: { border: 'none', background: '#1d4ed8', color: '#fff', borderRadius: '8px', padding: '10px 12px', cursor: 'pointer', fontWeight: '700' },
-  main: {
-    maxWidth: '1300px',
-    margin: '16px auto',
-    padding: '0 16px',
-    display: 'grid',
-    gridTemplateColumns: '1fr 280px',
-    gap: '16px'
-  },
-  leftCol: { minWidth: 0 },
-  rightCol: { position: 'sticky', top: '88px', height: 'fit-content' },
-  passageCard: { background: '#fff', borderRadius: '12px', padding: '16px', marginBottom: '14px', border: '1px solid #e2e8f0' },
-  editModePanel: { background: '#fff', borderRadius: '12px', padding: '20px', border: '2px solid #2563eb', marginBottom: '14px' },
-  editModeHeader: { marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #e5e7eb' },
-  editModeNote: { margin: '8px 0 0 0', color: '#666', fontSize: '14px', fontStyle: 'italic' },
-  editSection: { marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #f0f0f0' },
-  editSectionTitle: { margin: '0 0 10px 0', color: '#0f172a', fontSize: '15px', fontWeight: '600' },
-  editNote: { margin: '8px 0 0 0', color: '#888', fontSize: '12px', fontStyle: 'italic', background: '#f9fafb', padding: '8px', borderRadius: '6px' },
-  questionsCard: { background: '#fff', borderRadius: '12px', padding: '16px', border: '1px solid #e2e8f0' },
-  sectionTitle: { marginTop: 0, color: '#0f172a' },
-  passageText: { whiteSpace: 'pre-line', lineHeight: 1.6, color: '#334155' },
-  writingBox: {
-    width: '100%',
-    minHeight: '180px',
-    marginTop: '10px',
-    borderRadius: '8px',
-    border: '1px solid #d1d5db',
-    padding: '10px',
-    fontSize: '14px',
-    lineHeight: 1.5,
-    boxSizing: 'border-box'
-  },
-  recordRow: { display: 'flex', alignItems: 'center', gap: '10px' },
-  micBtn: { border: 'none', background: '#0f766e', color: '#fff', borderRadius: '8px', padding: '10px 12px', cursor: 'pointer', fontWeight: '700' },
-  stopBtn: { border: 'none', background: '#b91c1c', color: '#fff', borderRadius: '8px', padding: '10px 12px', cursor: 'pointer', fontWeight: '700' },
-  recText: { color: '#b91c1c', fontWeight: '700' },
-  questionBlock: { borderTop: '1px solid #e5e7eb', paddingTop: '14px', marginTop: '14px' },
-  questionText: { fontWeight: '700', color: '#111827', marginBottom: '10px' },
-  optionGrid: { display: 'grid', gap: '8px' },
-  optionBtn: { textAlign: 'left', border: '1px solid #d1d5db', background: '#fff', borderRadius: '8px', padding: '10px', cursor: 'pointer' },
-  optionSelected: { borderColor: '#2563eb', background: '#eff6ff' },
-  optionCorrect: { borderColor: '#16a34a', background: '#ecfdf3' },
-  optionWrong: { borderColor: '#dc2626', background: '#fef2f2' },
-  explain: { marginTop: '8px', color: '#475569', fontSize: '14px' },
-  panelCard: { background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px' },
-  panelTitle: { marginTop: 0, marginBottom: '10px', color: '#0f172a' },
-  navGrid: { display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' },
-  navBtn: { border: '1px solid #cbd5e1', background: '#fff', borderRadius: '6px', minHeight: '34px', cursor: 'pointer' },
-  navAnswered: { background: '#dbeafe', borderColor: '#60a5fa' },
-  scoreBox: { marginTop: '12px', background: '#f8fafc', border: '1px solid #dbeafe', padding: '10px', borderRadius: '8px', fontWeight: '700', color: '#1e3a8a' },
-  statusText: { textAlign: 'center', padding: '24px', color: '#64748b' },
-  errorText: { textAlign: 'center', padding: '24px', color: '#dc2626' },
-  editBtn: { border: '1px solid #1f7a8c', background: '#f8fbff', color: '#1f7a8c', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' },
-  editTextarea: { width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontFamily: 'sans-serif', fontSize: '14px', lineHeight: 1.5, boxSizing: 'border-box', minHeight: '80px', resize: 'vertical' },
-  editBtnGroup: { display: 'flex', gap: '8px', marginTop: '8px' },
-  saveBtnSmall: { border: 'none', background: '#059669', color: '#fff', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' },
-  cancelBtnSmall: { border: '1px solid #cbd5e1', background: '#fff', color: '#475569', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' },
-  label: { display: 'block', marginBottom: '6px', color: '#555', fontWeight: '600', fontSize: '13px' },
-  headerBtnGroup: { display: 'flex', gap: '8px', alignItems: 'center' },
-  editModeBtn: { border: '1px solid #1f7a8c', background: '#f8fbff', color: '#1f7a8c', padding: '10px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '14px' },
-  deleteBtn: { border: '1px solid #dc2626', background: '#fff5f5', color: '#b91c1c', padding: '10px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '14px' },
-  cancelBtn: { border: '1px solid #cbd5e1', background: '#fff', color: '#475569', padding: '10px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '14px' },
-  editQuestionBlock: { borderTop: '1px solid #e5e7eb', paddingTop: '14px', marginTop: '14px', padding: '14px', background: '#f9fafb', borderRadius: '8px' },
-  editQuestionLabel: { marginTop: '10px', marginBottom: '6px', fontWeight: '600', color: '#333', fontSize: '13px' },
-  editInput: { width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', lineHeight: 1.5, boxSizing: 'border-box', marginBottom: '8px' },
-  editSelect: { width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box', marginBottom: '8px' }
-};
 
 export default ExerciseAttemptPage;

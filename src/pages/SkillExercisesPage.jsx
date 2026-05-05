@@ -49,7 +49,6 @@ function SkillExercisesPage() {
           <>
             <div style={styles.infoCard}>
               <div><strong>Khóa học:</strong> {course?.name}</div>
-              <div><strong>Trình độ:</strong> {String(course?.level || '').toUpperCase()}</div>
               <div><strong>Kỹ năng:</strong> {SKILL_LABEL[skill] || skill}</div>
             </div>
 

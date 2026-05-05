@@ -8,7 +8,6 @@ import AdminAccountManager from './pages/AdminAccountManager';
 import AdminContentManager from './pages/AdminContentManager';
 import TeacherCreateContent from './pages/TeacherCreateContent';
 import CourseSkillsPage from './pages/CourseSkillsPage';
-import SkillExercisesPage from './pages/SkillExercisesPage';
 import ExerciseAttemptPage from './pages/ExerciseAttemptPage';
 import PrivateRoute from './components/PrivateRoute';
 
@@ -58,14 +57,6 @@ function App() {
           element={
             <PrivateRoute>
               <CourseSkillsPage />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/courses/:courseId/skills/:skill/exercises"
-          element={
-            <PrivateRoute>
-              <SkillExercisesPage />
             </PrivateRoute>
           }
         />

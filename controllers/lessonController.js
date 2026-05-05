@@ -1,4 +1,4 @@
-import { Lesson, Vocabulary, Grammar, Course, UserProgress } from '../models/index.js';
+import { Lesson, Vocabulary, Grammar, Language, UserProgress } from '../models/index.js';
 
 const normalizeSkillType = (skill) => {
   if (!skill) return null;
@@ -16,11 +16,12 @@ const normalizeCefrLevel = (level) => {
 
 export const getLessons = async (req, res) => {
   try {
-    const { courseId, skill, exerciseOnly, cefrLevel } = req.query;
+    const { languageId, courseId, skill, exerciseOnly, cefrLevel } = req.query;
     const where = { is_deleted: false };
 
-    if (courseId) {
-      where.course_id = courseId;
+    const resolvedLanguageId = languageId || courseId;
+    if (resolvedLanguageId) {
+      where.language_id = resolvedLanguageId;
     }
 
     const skillType = normalizeSkillType(skill);
@@ -65,7 +66,7 @@ export const getLessonById = async (req, res) => {
       include: [
         { model: Vocabulary, as: 'vocabularyItems' },
         { model: Grammar, as: 'grammarPoints' },
-        { model: Course, as: 'course' }
+        { model: Language, as: 'language' }
       ]
     });
 
@@ -82,6 +83,7 @@ export const getLessonById = async (req, res) => {
 export const createLesson = async (req, res) => {
   try {
     const {
+      language_id,
       course_id,
       title,
       content,
@@ -91,13 +93,10 @@ export const createLesson = async (req, res) => {
       is_ai_exercise
     } = req.body;
 
-    if (!course_id || !title) {
-      return res.status(400).json({ message: 'course_id and title are required' });
-    }
+    const resolvedLanguageId = language_id || course_id;
 
-    const course = await Course.findOne({ where: { id: course_id, is_deleted: false } });
-    if (!course) {
-      return res.status(400).json({ message: 'course_id is invalid or deleted' });
+    if (!resolvedLanguageId || !title) {
+      return res.status(400).json({ message: 'language_id and title are required' });
     }
 
     const normalizedSkillType = normalizeSkillType(skill_type);
@@ -111,7 +110,7 @@ export const createLesson = async (req, res) => {
     }
 
     const lesson = await Lesson.create({
-      course_id,
+      language_id: resolvedLanguageId,
       title,
       content,
       lesson_order: lesson_order || 1,
@@ -134,11 +133,9 @@ export const updateLesson = async (req, res) => {
       return res.status(404).json({ message: 'Lesson not found' });
     }
 
-    if (Object.prototype.hasOwnProperty.call(req.body, 'course_id')) {
-      const course = await Course.findOne({ where: { id: req.body.course_id, is_deleted: false } });
-      if (!course) {
-        return res.status(400).json({ message: 'course_id is invalid or deleted' });
-      }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'language_id') || Object.prototype.hasOwnProperty.call(req.body, 'course_id')) {
+      const resolvedLanguageId = req.body.language_id || req.body.course_id;
+      req.body.language_id = resolvedLanguageId;
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'skill_type')) {
@@ -166,15 +163,16 @@ export const updateLesson = async (req, res) => {
 
 export const getDeletedLessons = async (req, res) => {
   try {
-    const { courseId } = req.query;
+    const { languageId, courseId } = req.query;
     const where = { is_deleted: true };
-    if (courseId) {
-      where.course_id = courseId;
+    const resolvedLanguageId = languageId || courseId;
+    if (resolvedLanguageId) {
+      where.language_id = resolvedLanguageId;
     }
 
     const lessons = await Lesson.findAll({
       where,
-      include: [{ model: Course, as: 'course' }],
+      include: [{ model: Language, as: 'language' }],
       order: [['lesson_order', 'ASC']]
     });
     res.json(lessons);
@@ -188,11 +186,6 @@ export const restoreLesson = async (req, res) => {
     const lesson = await Lesson.findOne({ where: { id: req.params.id, is_deleted: true } });
     if (!lesson) {
       return res.status(404).json({ message: 'Lesson not found' });
-    }
-
-    const course = await Course.findOne({ where: { id: lesson.course_id, is_deleted: false } });
-    if (!course) {
-      return res.status(400).json({ message: 'Cannot restore lesson because course is deleted' });
     }
 
     await lesson.update({ is_deleted: false });

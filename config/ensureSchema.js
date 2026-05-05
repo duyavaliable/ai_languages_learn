@@ -10,26 +10,36 @@ const ensureColumn = async (tableName, columnName, definition) => {
   }
 };
 
-export const ensureDatabaseSchema = async () => {
-  await ensureColumn('lessons', 'skill_type', {
-    type: DataTypes.STRING(32),
-    allowNull: true
-  });
-
-  await ensureColumn('lessons', 'cefr_level', {
-    type: DataTypes.STRING(16),
-    allowNull: true
-  });
-
-  await ensureColumn('lessons', 'is_ai_exercise', {
-    type: DataTypes.BOOLEAN,
-    allowNull: false,
-    defaultValue: false
-  });
-
+const dropTableIfExists = async (tableName) => {
   const queryInterface = sequelize.getQueryInterface();
   const allTables = await queryInterface.showAllTables();
   const tableNames = allTables.map((item) => (typeof item === 'string' ? item : item.tableName));
+
+  if (tableNames.includes(tableName)) {
+    await queryInterface.dropTable(tableName);
+  }
+};
+
+export const ensureDatabaseSchema = async () => {
+  const queryInterface = sequelize.getQueryInterface();
+  const allTables = await queryInterface.showAllTables();
+  const tableNames = allTables.map((item) => (typeof item === 'string' ? item : item.tableName));
+
+  // Create simplified lessons table (linked to languages)
+  if (!tableNames.includes('lessons')) {
+    await queryInterface.createTable('lessons', {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      language_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
+      title: { type: DataTypes.STRING(225), allowNull: false },
+      is_deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }
+    });
+  } else {
+    // Ensure language_id column exists in existing lessons table
+    await ensureColumn('lessons', 'language_id', {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: true // Allow null temporarily for existing records
+    });
+  }
 
   if (!tableNames.includes('exercises')) {
     await queryInterface.createTable('exercises', {

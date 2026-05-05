@@ -1,4 +1,4 @@
-import { Exercise, Course, Lesson } from '../models/index.js';
+import { Exercise, Lesson } from '../models/index.js';
 import { parseExerciseParts, extractQuestionsFromPart, extractPassageTextFromPart } from '../services/exerciseImportService.js';
 
 const normalizeSkillType = (skill) => {
@@ -8,16 +8,9 @@ const normalizeSkillType = (skill) => {
   return supported.includes(value) ? value : null;
 };
 
-const normalizeCefrLevel = (level) => {
-  if (!level) return null;
-  const value = String(level).trim().toUpperCase();
-  const supported = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
-  return supported.includes(value) ? value : null;
-};
-
 export const getExercises = async (req, res) => {
   try {
-    const { courseId, skill, cefrLevel, includeDeleted } = req.query;
+    const { courseId, skill, includeDeleted } = req.query;
     const role = String(req.user?.role || '').toLowerCase();
     const where = {};
 
@@ -36,14 +29,6 @@ export const getExercises = async (req, res) => {
       where.skill_type = normalizedSkill;
     }
 
-    if (cefrLevel) {
-      const normalizedLevel = normalizeCefrLevel(cefrLevel);
-      if (!normalizedLevel) {
-        return res.status(400).json({ message: 'cefrLevel must be one of A1, A2, B1, B2, C1, C2' });
-      }
-      where.cefr_level = normalizedLevel;
-    }
-
     const exercises = await Exercise.findAll({
       where,
       order: [['id', 'DESC']]
@@ -58,8 +43,7 @@ export const getExercises = async (req, res) => {
 export const getExerciseById = async (req, res) => {
   try {
     const exercise = await Exercise.findOne({
-      where: { id: req.params.id, is_deleted: false },
-      include: [{ model: Course, as: 'course' }]
+      where: { id: req.params.id, is_deleted: false }
     });
 
     if (!exercise) {
@@ -185,7 +169,7 @@ export const previewExerciseFile = async (req, res) => {
 
 export const createExercisesFromParts = async (req, res) => {
   try {
-    const { course_id, exerciseTitle, skill, cefrLevel } = req.body;
+    const { course_id, exerciseTitle, skill } = req.body;
     let parts = [];
     try {
       parts = req.body.parts ? (typeof req.body.parts === 'string' ? JSON.parse(req.body.parts) : req.body.parts) : [];
@@ -193,12 +177,19 @@ export const createExercisesFromParts = async (req, res) => {
       return res.status(400).json({ message: 'Invalid parts payload' });
     }
 
-    if (!course_id) return res.status(400).json({ message: 'course_id is required' });
-    const course = await Course.findOne({ where: { id: course_id, is_deleted: false } });
-    if (!course) return res.status(400).json({ message: 'course_id is invalid or deleted' });
-
     const normalizedSkill = normalizeSkillType(skill) || 'reading';
-    const normalizedLevel = normalizeCefrLevel(cefrLevel) || 'A2';
+    const normalizedLevel = 'A2';
+
+    let resolvedCourseId = Number(course_id);
+    if (!Number.isFinite(resolvedCourseId) || resolvedCourseId <= 0) {
+      const firstExercise = await Exercise.findOne({
+        attributes: ['course_id'],
+        where: { is_deleted: false },
+        order: [['id', 'ASC']]
+      });
+      const fallbackCourseId = Number(firstExercise?.course_id);
+      resolvedCourseId = Number.isFinite(fallbackCourseId) && fallbackCourseId > 0 ? fallbackCourseId : 1;
+    }
 
     // handle optional audio upload (req.file) - save to uploads/audio like AI controller
     let audioUrl = null;
@@ -238,7 +229,7 @@ export const createExercisesFromParts = async (req, res) => {
       const time_limit_sec = (normalizedSkill === 'writing' || normalizedSkill === 'speaking') ? 900 : 300;
 
       const row = await Exercise.create({
-        course_id: Number(course_id),
+        course_id: resolvedCourseId,
         title: name,
         skill_type: normalizedSkill,
         cefr_level: normalizedLevel,

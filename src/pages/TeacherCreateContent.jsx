@@ -19,7 +19,7 @@ const defaultCourse = {
 };
 
 const defaultLesson = {
-  course_id: '',
+  language_id: '',
   title: '',
   content: '',
   lesson_order: 1
@@ -30,13 +30,13 @@ const defaultExercise = {
   lesson_id: '',
   title: '',
   skill: 'reading',
-  cefrLevel: 'A2',
-  count: 5
+  cefrLevel: 'A2'
 };
 
 const defaultVocabulary = {
-  course_id: '',
+  language_id: '',
   lesson_id: '',
+  lesson_title: '',
   word: '',
   pronunciation: '',
   meaning: '',
@@ -49,7 +49,7 @@ const toCefrLevel = (value) => String(value || '').trim().toUpperCase();
 function TeacherCreateContent() {
   const navigate = useNavigate();
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-  const [mode, setMode] = useState('course');
+  const [mode, setMode] = useState('vocabulary');
 
   const [languages, setLanguages] = useState([]);
   const [courses, setCourses] = useState([]);
@@ -108,6 +108,20 @@ function TeacherCreateContent() {
 
     setLoading(true);
     api.get(`/lessons?courseId=${courseId}`)
+      .then((res) => setLessons(res.data || []))
+      .catch(() => setLessons([]))
+      .finally(() => setLoading(false));
+  };
+
+  const fetchLessonsForLanguage = (languageId, setLessons, setLoading) => {
+    if (!languageId) {
+      setLessons([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    api.get(`/lessons?languageId=${languageId}`)
       .then((res) => setLessons(res.data || []))
       .catch(() => setLessons([]))
       .finally(() => setLoading(false));
@@ -200,7 +214,7 @@ function TeacherCreateContent() {
   const syncVocabularyLesson = (courseId, lessonId = '') => {
     setVocabularyForm((prev) => ({
       ...prev,
-      course_id: courseId,
+      language_id: courseId,
       lesson_id: lessonId
     }));
   };
@@ -271,9 +285,6 @@ function TeacherCreateContent() {
       if (String(exerciseForm.course_id) === String(createdCourseId)) {
         fetchLessonsForCourse(createdCourseId, setExerciseLessons, setExerciseLessonLoading);
       }
-      if (String(vocabularyForm.course_id) === String(createdCourseId)) {
-        fetchLessonsForCourse(createdCourseId, setVocabularyLessons, setVocabularyLessonLoading);
-      }
       showMsg('success', 'Tạo chủ đề thành công');
     } catch (err) {
       showMsg('error', err.response?.data?.message || 'Tạo chủ đề thất bại');
@@ -340,7 +351,7 @@ function TeacherCreateContent() {
                 questions: Array.isArray(c.questions) ? c.questions : []
               },
               skill: exerciseForm.skill,
-              questionCount: Array.isArray(c.questions) ? c.questions.length : 0
+              
             });
           }
         }
@@ -396,11 +407,12 @@ function TeacherCreateContent() {
     }));
   };
 
-  const handleVocabularyCourseChange = (courseId) => {
+  const handleVocabularyLanguageChange = (languageId) => {
     setVocabularyForm((prev) => ({
       ...prev,
-      course_id: courseId,
+      language_id: languageId,
       lesson_id: '',
+      lesson_title: '',
       word: '',
       pronunciation: '',
       meaning: '',
@@ -410,7 +422,7 @@ function TeacherCreateContent() {
     setVocabularyLessons([]);
     setVocabularies([]);
     resetVocabularyPreview();
-    fetchLessonsForCourse(courseId, setVocabularyLessons, setVocabularyLessonLoading);
+    fetchLessonsForLanguage(languageId, setVocabularyLessons, setVocabularyLessonLoading);
   };
 
   const handleVocabularyLessonChange = (lessonId) => {
@@ -418,6 +430,12 @@ function TeacherCreateContent() {
       ...prev,
       lesson_id: lessonId
     }));
+    resetVocabularyPreview();
+    fetchVocabulary(lessonId);
+  };
+
+  const handleVocabularySelectExistingLesson = (lessonId) => {
+    setVocabularyForm((prev) => ({ ...prev, lesson_id: lessonId, lesson_title: '' }));
     resetVocabularyPreview();
     fetchVocabulary(lessonId);
   };
@@ -510,8 +528,24 @@ function TeacherCreateContent() {
   };
 
   const importPreviewVocabulary = async () => {
-    if (!vocabularyForm.lesson_id) {
-      setVocabularyPreviewMsg({ type: 'error', text: 'Vui lòng chọn lesson trước khi lưu.' });
+    // ensure lesson exists: if teacher provided a title, create the lesson first
+    let lessonId = vocabularyForm.lesson_id;
+    try {
+      if (!lessonId) {
+        const title = String(vocabularyForm.lesson_title || '').trim();
+        if (!title) {
+          setVocabularyPreviewMsg({ type: 'error', text: 'Vui lòng chọn hoặc nhập tên lesson trước khi lưu.' });
+          return;
+        }
+        const languageId = vocabularyForm.language_id || (languages[0] && languages[0].id);
+        const lessonRes = await api.post('/lessons/teacher-create', { language_id: languageId, title });
+        lessonId = lessonRes.data?.id;
+        // refresh lesson list
+        fetchLessonsForLanguage(languageId, setVocabularyLessons, setVocabularyLessonLoading);
+        setVocabularyForm((prev) => ({ ...prev, lesson_id: lessonId }));
+      }
+    } catch (err) {
+      setVocabularyPreviewMsg({ type: 'error', text: err.response?.data?.message || 'Không thể tạo lesson tự động' });
       return;
     }
 
@@ -533,14 +567,14 @@ function TeacherCreateContent() {
     setVocabularySaveLoading(true);
     try {
       await api.post('/vocabulary/import-batch', {
-        lesson_id: Number(vocabularyForm.lesson_id),
+        lesson_id: Number(lessonId),
         items: normalizedItems
       });
 
       setVocabularyMsg({ type: 'success', text: `Đã lưu ${normalizedItems.length} từ vựng từ file.` });
       setVocabularyPreviewMsg({ type: 'success', text: 'Lưu thành công. Bảng preview đã được làm mới.' });
       resetVocabularyPreview();
-      fetchVocabulary(vocabularyForm.lesson_id);
+      fetchVocabulary(lessonId);
     } catch (err) {
       setVocabularyPreviewMsg({ type: 'error', text: err.response?.data?.message || 'Lưu từ vựng từ file thất bại' });
     } finally {
@@ -550,11 +584,13 @@ function TeacherCreateContent() {
 
   const handleEditVocabulary = (item) => {
     setEditingVocabulary(item.id);
-    const nextCourseId = item.lesson?.course_id ? String(item.lesson.course_id) : '';
+    const nextLanguageId = item.lesson?.language_id ? String(item.lesson.language_id) : '';
     const nextLessonId = item.lesson_id ? String(item.lesson_id) : '';
+    const nextLessonTitle = item.lesson?.title || '';
     setVocabularyForm({
-      course_id: nextCourseId,
+      language_id: nextLanguageId,
       lesson_id: nextLessonId,
+      lesson_title: nextLessonTitle,
       word: item.word || '',
       pronunciation: item.pronunciation || '',
       meaning: item.meaning || '',
@@ -562,8 +598,8 @@ function TeacherCreateContent() {
       example_translation: item.example_translation || ''
     });
     setMode('vocabulary');
-    if (nextCourseId) {
-      fetchLessonsForCourse(nextCourseId, setVocabularyLessons, setVocabularyLessonLoading);
+    if (nextLanguageId) {
+      fetchLessonsForLanguage(nextLanguageId, setVocabularyLessons, setVocabularyLessonLoading);
     }
     if (nextLessonId) {
       fetchVocabulary(nextLessonId);
@@ -574,8 +610,9 @@ function TeacherCreateContent() {
     setEditingVocabulary(null);
     setVocabularyForm((prev) => ({
       ...defaultVocabulary,
-      course_id: prev.course_id,
-      lesson_id: prev.lesson_id
+      language_id: prev.language_id,
+      lesson_id: prev.lesson_id,
+      lesson_title: prev.lesson_title
     }));
   };
 
@@ -583,14 +620,34 @@ function TeacherCreateContent() {
     e.preventDefault();
     setVocabularyMsg(null);
 
-    if (!vocabularyForm.lesson_id || !vocabularyForm.word.trim() || !vocabularyForm.meaning.trim()) {
-      setVocabularyMsg({ type: 'error', text: 'Vui lòng chọn lesson và nhập từ + nghĩa.' });
+    if (!vocabularyForm.lesson_id && !String(vocabularyForm.lesson_title || '').trim()) {
+      setVocabularyMsg({ type: 'error', text: 'Vui lòng chọn lesson hoặc nhập tên lesson trước khi lưu từ.' });
       return;
+    }
+    if (!vocabularyForm.word.trim() || !vocabularyForm.meaning.trim()) {
+      setVocabularyMsg({ type: 'error', text: 'Vui lòng nhập từ và nghĩa.' });
+      return;
+    }
+
+    // if lesson id missing but title present, create lesson
+    let lessonId = vocabularyForm.lesson_id;
+    if (!lessonId) {
+      try {
+        const languageId = vocabularyForm.language_id || (languages[0] && languages[0].id);
+        const title = String(vocabularyForm.lesson_title || '').trim();
+        const lessonRes = await api.post('/lessons/teacher-create', { language_id: languageId, title });
+        lessonId = lessonRes.data?.id;
+        fetchLessonsForLanguage(languageId, setVocabularyLessons, setVocabularyLessonLoading);
+        setVocabularyForm((prev) => ({ ...prev, lesson_id: lessonId }));
+      } catch (err) {
+        setVocabularyMsg({ type: 'error', text: err.response?.data?.message || 'Không thể tạo lesson tự động' });
+        return;
+      }
     }
 
     try {
       const payload = {
-        lesson_id: Number(vocabularyForm.lesson_id),
+        lesson_id: Number(lessonId),
         word: vocabularyForm.word,
         pronunciation: vocabularyForm.pronunciation,
         meaning: vocabularyForm.meaning,
@@ -625,27 +682,42 @@ function TeacherCreateContent() {
       <div style={styles.header}>
         <div style={styles.headerLeft}>
           <button onClick={() => navigate('/')} style={styles.backBtn}>← Quay lại</button>
-          <span style={styles.logo}>🧑‍🏫 Teacher Content Creator</span>
+          <div>
+            <div style={styles.logo}>Teacher Workspace</div>
+          </div>
         </div>
         <span style={styles.welcomeText}>Giáo viên: <strong>{currentUser.username}</strong></span>
       </div>
 
       <div style={styles.content}>
+        <div style={styles.hero}>
+          <div style={styles.heroStats}>
+            <div style={styles.statCard}>
+              <span style={styles.statLabel}>Vocabulary rows</span>
+              <strong style={styles.statValue}>{vocabularyPreviewRows.length || vocabularies.length}</strong>
+            </div>
+            <div style={styles.statCard}>
+              <span style={styles.statLabel}>Exercise parts</span>
+              <strong style={styles.statValue}>{exerciseParts.length}</strong>
+            </div>
+          </div>
+        </div>
+
+        <div style={styles.mainPanel}>
+            <div style={styles.panelHeader}>
+              <div>
+                <div style={styles.panelEyebrow}>Content tools</div>
+                <h2 style={styles.panelTitle}>{mode === 'vocabulary' ? 'Vocabulary editor' : 'Exercise builder'}</h2>
+              </div>
+              <div style={styles.panelMeta}>
+                <span style={mode === 'vocabulary' ? styles.panelPillActive : styles.panelPill}>Vocabulary</span>
+                <span style={mode === 'exercise' ? styles.panelPillActive : styles.panelPill}>Exercise</span>
+              </div>
+            </div>
+
         {message && <div style={message.type === 'success' ? styles.successBanner : styles.errorBanner}>{message.text}</div>}
 
         <div style={styles.modeBar}>
-          <button
-            onClick={() => setMode('course')}
-            style={mode === 'course' ? styles.modeBtnActive : styles.modeBtn}
-          >
-            Tạo Course
-          </button>
-          <button
-            onClick={() => setMode('lesson')}
-            style={mode === 'lesson' ? styles.modeBtnActive : styles.modeBtn}
-          >
-            Tạo Lesson
-          </button>
           <button
             onClick={() => setMode('vocabulary')}
             style={mode === 'vocabulary' ? styles.modeBtnActive : styles.modeBtn}
@@ -660,7 +732,7 @@ function TeacherCreateContent() {
           </button>
         </div>
 
-        {mode === 'course' && (
+        {false && mode === 'course' && (
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Tạo Course</h3>
             <form onSubmit={submitCourse}>
@@ -671,13 +743,6 @@ function TeacherCreateContent() {
               <select style={styles.input} value={courseForm.language_id} onChange={(e) => setCourseForm((p) => ({ ...p, language_id: e.target.value }))} required>
                 <option value="">-- Chọn ngôn ngữ --</option>
                 {languages.map((l) => (<option key={l.id} value={l.id}>{l.name}</option>))}
-              </select>
-
-              <label style={styles.label}>Level</label>
-              <select style={styles.input} value={courseForm.level} onChange={(e) => setCourseForm((p) => ({ ...p, level: e.target.value }))}>
-                {CEFR_LEVELS.map((lv) => (
-                  <option key={lv} value={lv}>{lv}</option>
-                ))}
               </select>
 
               <label style={styles.label}>Duration (hours)</label>
@@ -691,7 +756,7 @@ function TeacherCreateContent() {
           </div>
         )}
 
-        {mode === 'lesson' && (
+        {false && mode === 'lesson' && (
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Tạo Lesson / Chủ đề</h3>
             <form onSubmit={submitLesson}>
@@ -727,27 +792,25 @@ function TeacherCreateContent() {
             <div style={styles.uploadBox}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
-                  <label style={styles.label}>Course</label>
+                  <label style={styles.label}>Ngôn ngữ</label>
                   <select
                     style={styles.input}
-                    value={vocabularyForm.course_id}
-                    onChange={(e) => handleVocabularyCourseChange(e.target.value)}
-                    required
+                    value={vocabularyForm.language_id}
+                    onChange={(e) => handleVocabularyLanguageChange(e.target.value)}
                   >
-                    <option value="">-- Chọn course --</option>
-                    {courses.map((course) => (
-                      <option key={course.id} value={course.id}>{course.name}</option>
+                    <option value="">-- Chọn ngôn ngữ --</option>
+                    {languages.map((lang) => (
+                      <option key={lang.id} value={lang.id}>{lang.name}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label style={styles.label}>Lesson / chủ đề</label>
+                  <label style={styles.label}>Chọn lesson có sẵn (tùy chọn)</label>
                   <select
                     style={styles.input}
                     value={vocabularyForm.lesson_id}
-                    onChange={(e) => handleVocabularyLessonChange(e.target.value)}
-                    disabled={!vocabularyForm.course_id || vocabularyLessonLoading}
-                    required
+                    onChange={(e) => handleVocabularySelectExistingLesson(e.target.value)}
+                    disabled={!vocabularyForm.language_id || vocabularyLessonLoading}
                   >
                     <option value="">-- Chọn lesson --</option>
                     {vocabularyLessons.map((lesson) => (
@@ -757,6 +820,14 @@ function TeacherCreateContent() {
                 </div>
               </div>
 
+              <label style={{ ...styles.label, marginTop: '12px' }}>Hoặc nhập tên chủ đề (ví dụ: Healthy)</label>
+              <input
+                style={styles.input}
+                value={vocabularyForm.lesson_title}
+                onChange={(e) => setVocabularyForm((prev) => ({ ...prev, lesson_title: e.target.value, lesson_id: '' }))}
+                placeholder="Nhập tên chủ đề mới hoặc để trống nếu chọn lesson có sẵn"
+              />
+
               <label style={styles.label}>File từ vựng (PDF, DOCX, TXT)</label>
               <input
                 type="file"
@@ -764,14 +835,6 @@ function TeacherCreateContent() {
                 style={styles.input}
                 onChange={(e) => handleVocabularyFileChange(e.target.files?.[0] || null)}
               />
-              <label style={styles.checkboxLabel}>
-                <input
-                  type="checkbox"
-                  checked={vocabularyUseAiValidation}
-                  onChange={(e) => setVocabularyUseAiValidation(e.target.checked)}
-                />
-                <span>Dùng AI validation (tùy chọn) để rà soát cột English / Phiên âm / Nghĩa</span>
-              </label>
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                 <button type="button" onClick={previewVocabularyFile} style={styles.submitBtn} disabled={vocabularyPreviewLoading || !vocabularyFile}>
                   {vocabularyPreviewLoading ? 'Đang quét file...' : 'Quét & xem trước'}
@@ -953,30 +1016,14 @@ function TeacherCreateContent() {
         {mode === 'exercise' && (
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Tạo Exercise (AI)</h3>
-            <p style={styles.hintText}>Giáo viên chọn khóa học, kỹ năng, trình độ và số câu. Hệ thống sẽ quét file, tách phần nội dung và tạo một bài riêng cho mỗi phần đã chọn.</p>
+            <p style={styles.hintText}>Giáo viên chọn kỹ năng. Hệ thống sẽ quét file, tách phần nội dung và tạo một bài riêng cho mỗi phần đã chọn.</p>
             {generateLoading && (
               <div style={styles.loadingBanner}>
                 <span style={styles.loadingDot} />
-                AI đang tạo bài, vui lòng chờ...
+                Đang tạo bài, vui lòng chờ...
               </div>
             )}
-            <form onSubmit={submitExercise} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr auto', gap: '12px', alignItems: 'end' }}>
-              <div>
-                <label style={styles.label}>Khóa học</label>
-                <select
-                  style={styles.input}
-                  value={exerciseForm.course_id}
-                  onChange={(e) => handleExerciseCourseChange(e.target.value)}
-                  required
-                >
-                  <option value="">-- Chọn khóa --</option>
-                  {courses.map((course) => (
-                    <option key={course.id} value={course.id}>
-                      {course.name} ({String(course.level || '').toUpperCase()})
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <form onSubmit={submitExercise} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '12px', alignItems: 'end' }}>
               <div>
                 <label style={styles.label}>Kỹ năng</label>
                 <select
@@ -986,8 +1033,7 @@ function TeacherCreateContent() {
                     const nextSkill = e.target.value;
                     setExerciseForm((p) => ({
                       ...p,
-                      skill: nextSkill,
-                      count: nextSkill === 'writing' || nextSkill === 'speaking' ? 0 : (p.count || 5)
+                      skill: nextSkill
                     }));
                     if (nextSkill !== 'listening') {
                       setListeningAudioFile(null);
@@ -999,30 +1045,6 @@ function TeacherCreateContent() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label style={styles.label}>Trình độ</label>
-                <select
-                  style={styles.input}
-                  value={exerciseForm.cefrLevel}
-                  onChange={(e) => setExerciseForm((p) => ({ ...p, cefrLevel: e.target.value }))}
-                >
-                  {CEFR_LEVELS.map((level) => (
-                    <option key={level} value={level}>{level}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label style={styles.label}>Số câu</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  disabled={exerciseForm.skill === 'writing' || exerciseForm.skill === 'speaking'}
-                  style={styles.input}
-                  value={exerciseForm.count}
-                  onChange={(e) => setExerciseForm((p) => ({ ...p, count: e.target.value }))}
-                />
-              </div>
 
               <div style={{ gridColumn: '1 / -1' }}>
                 <label style={styles.label}>Tên bài</label>
@@ -1033,13 +1055,7 @@ function TeacherCreateContent() {
                   placeholder="Nhập tên bài do bạn đặt"
                   required
                 />
-                <div style={styles.helperText}>AI chỉ tạo nội dung bài. Tên bài do người dùng đặt.</div>
               </div>
-
-              <div style={{ gridColumn: '1 / -1' }}>
-                <div style={styles.helperText}>Tạo bằng AI đã bị vô hiệu hóa. Vui lòng quét và chọn phần nội dung để tạo bài.</div>
-              </div>
-
             {exerciseForm.skill === 'listening' && (
               <div style={{ marginTop: '12px' }}>
                 <label style={styles.label}>File nghe (mp3, wav, m4a, webm, ogg)</label>
@@ -1273,7 +1289,6 @@ function TeacherCreateContent() {
                   {createdExerciseInfos.map((item) => (
                     <div key={item.exerciseId || item.exerciseTitle} style={styles.exerciseCard}>
                       <div style={styles.exerciseQuestion}>Đã tạo: {item.exerciseTitle}</div>
-                      <div style={styles.answer}>Số câu: {item.questionCount}</div>
                       {item.exerciseSet?.taskPrompt && (
                         <div style={styles.previewBlock}>
                           <strong>Đề bài:</strong>
@@ -1338,51 +1353,131 @@ function TeacherCreateContent() {
 
                 {/* AI refine removed */}
 
-                <div style={{ marginTop: '10px' }}>
-                  <button type="button" style={styles.secondaryPreviewBtn} onClick={() => navigate(`/courses/${exerciseForm.course_id}/skills/${exerciseForm.skill}/exercises`)}>
-                    Xem danh sách bài
-                  </button>
-                </div>
               </div>
             )}
           </div>
         )}
-      </div>
+        </div>
     </div>
+  </div>
   );
 }
 
 const styles = {
-  wrapper: { fontFamily: 'sans-serif', minHeight: '100vh', background: '#f5f6fa' },
+  wrapper: {
+    minHeight: '100vh',
+    background: 'radial-gradient(circle at top left, rgba(31, 122, 140, 0.14), transparent 28%), linear-gradient(180deg, #eef4fb 0%, #f7f9fc 38%, #edf2f8 100%)',
+    color: '#0f172a',
+    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif'
+  },
   header: {
-    background: 'linear-gradient(135deg, #1f7a8c 0%, #2c5f8a 100%)',
+    background: 'rgba(8, 47, 73, 0.92)',
+    backdropFilter: 'blur(14px)',
+    borderBottom: '1px solid rgba(148, 163, 184, 0.18)',
     padding: '16px 32px',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    color: '#fff'
+    color: '#fff',
+    position: 'sticky',
+    top: 0,
+    zIndex: 20
   },
   headerLeft: { display: 'flex', alignItems: 'center', gap: '16px' },
   backBtn: {
-    background: 'rgba(255,255,255,0.2)',
+    background: 'rgba(255,255,255,0.12)',
     color: '#fff',
-    border: '1px solid rgba(255,255,255,0.4)',
-    padding: '7px 16px',
-    borderRadius: '6px',
+    border: '1px solid rgba(255,255,255,0.2)',
+    padding: '9px 16px',
+    borderRadius: '999px',
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: '600'
   },
-  logo: { fontSize: '20px', fontWeight: 'bold' },
-  welcomeText: { fontSize: '14px' },
-  content: { maxWidth: '1100px', margin: '0 auto', padding: '28px 24px' },
-  modeBar: { display: 'flex', gap: '10px', marginBottom: '16px' },
+  logo: { fontSize: '18px', fontWeight: '800', letterSpacing: '-0.02em' },
+  headerSubtitle: { fontSize: '12px', color: 'rgba(226, 232, 240, 0.82)', marginTop: '2px' },
+  welcomeText: { fontSize: '14px', color: 'rgba(226, 232, 240, 0.9)' },
+  content: { maxWidth: '1360px', margin: '0 auto', padding: '28px 24px 40px' },
+  hero: {
+    display: 'flex',
+    justifyContent: 'flex-start',
+    marginBottom: '18px'
+  },
+  heroCopy: {
+    background: 'linear-gradient(135deg, rgba(15, 118, 110, 0.14), rgba(37, 99, 235, 0.12))',
+    border: '1px solid rgba(148, 163, 184, 0.28)',
+    borderRadius: '24px',
+    padding: '24px 26px',
+    boxShadow: '0 20px 50px rgba(15, 23, 42, 0.08)'
+  },
+  heroEyebrow: { textTransform: 'uppercase', letterSpacing: '0.24em', color: '#2563eb', fontSize: '12px', fontWeight: '700' },
+  heroTitle: { margin: '10px 0 10px', fontSize: '30px', lineHeight: 1.15, letterSpacing: '-0.03em', color: '#0f172a' },
+  heroText: { margin: 0, color: '#475569', fontSize: '14px', lineHeight: 1.65, maxWidth: '760px' },
+  heroStats: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 240px))',
+    gap: '12px',
+    width: 'fit-content'
+  },
+  statCard: {
+    background: 'rgba(255,255,255,0.9)',
+    border: '1px solid rgba(148, 163, 184, 0.22)',
+    borderRadius: '18px',
+    padding: '18px 16px',
+    boxShadow: '0 12px 28px rgba(15, 23, 42, 0.06)',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    minHeight: '112px'
+  },
+  statLabel: { fontSize: '12px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.12em' },
+  statValue: { fontSize: '28px', color: '#0f172a', marginTop: '10px', letterSpacing: '-0.03em' },
+  mainPanel: {
+    background: 'rgba(255,255,255,0.82)',
+    border: '1px solid rgba(148, 163, 184, 0.2)',
+    borderRadius: '28px',
+    padding: '20px',
+    boxShadow: '0 22px 44px rgba(15, 23, 42, 0.08)',
+    backdropFilter: 'blur(10px)'
+  },
+  panelHeader: { display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'start', marginBottom: '18px', flexWrap: 'wrap' },
+  panelEyebrow: { textTransform: 'uppercase', letterSpacing: '0.18em', color: '#64748b', fontSize: '11px', fontWeight: '800' },
+  panelTitle: { margin: '6px 0 0', fontSize: '22px', color: '#0f172a', letterSpacing: '-0.02em' },
+  panelMeta: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
+  panelPill: {
+    padding: '8px 12px',
+    borderRadius: '999px',
+    border: '1px solid #dbe3ee',
+    background: '#f8fafc',
+    color: '#475569',
+    fontSize: '13px',
+    fontWeight: '700'
+  },
+  panelPillActive: {
+    padding: '8px 12px',
+    borderRadius: '999px',
+    border: '1px solid rgba(37, 99, 235, 0.18)',
+    background: 'linear-gradient(135deg, #dbeafe, #eff6ff)',
+    color: '#1d4ed8',
+    fontSize: '13px',
+    fontWeight: '800'
+  },
+  modeBar: {
+    display: 'flex',
+    gap: '10px',
+    marginBottom: '16px',
+    padding: '8px',
+    background: '#f8fafc',
+    border: '1px solid #e2e8f0',
+    borderRadius: '18px',
+    width: 'fit-content'
+  },
   modeBtn: {
-    background: '#edf2f7',
+    background: 'transparent',
     color: '#4a5568',
-    border: '1px solid #cbd5e0',
+    border: '1px solid transparent',
     padding: '10px 16px',
-    borderRadius: '8px',
+    borderRadius: '999px',
     cursor: 'pointer',
     fontWeight: '600',
     fontSize: '14px'
@@ -1390,21 +1485,22 @@ const styles = {
   modeBtnActive: {
     background: 'linear-gradient(135deg, #1f7a8c 0%, #2c5f8a 100%)',
     color: '#fff',
-    border: 'none',
+    border: '1px solid rgba(37, 99, 235, 0.12)',
     padding: '10px 16px',
-    borderRadius: '8px',
+    borderRadius: '999px',
     cursor: 'pointer',
     fontWeight: '600',
     fontSize: '14px'
   },
   card: {
     background: '#fff',
-    borderRadius: '12px',
-    padding: '20px',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.08)'
+    borderRadius: '22px',
+    padding: '22px',
+    boxShadow: '0 14px 36px rgba(15,23,42,0.06)',
+    border: '1px solid #e6edf5'
   },
-  cardTitle: { marginTop: 0, marginBottom: '14px', color: '#234' },
-  hintText: { marginTop: 0, marginBottom: '14px', color: '#4a5568', fontSize: '14px' },
+  cardTitle: { marginTop: 0, marginBottom: '14px', color: '#0f172a', fontSize: '20px', letterSpacing: '-0.02em' },
+  hintText: { marginTop: 0, marginBottom: '14px', color: '#52606d', fontSize: '14px', lineHeight: 1.6 },
   loadingBanner: {
     marginBottom: '12px',
     padding: '10px 12px',
@@ -1423,22 +1519,24 @@ const styles = {
     borderRadius: '999px',
     background: '#2563eb'
   },
-  label: { display: 'block', marginBottom: '6px', color: '#555', fontSize: '13px', fontWeight: '600' },
+  label: { display: 'block', marginBottom: '6px', color: '#334155', fontSize: '13px', fontWeight: '700' },
   input: {
     width: '100%',
-    padding: '10px 12px',
-    borderRadius: '8px',
-    border: '1px solid #ddd',
+    padding: '11px 12px',
+    borderRadius: '12px',
+    border: '1px solid #d6dee9',
     marginBottom: '12px',
     boxSizing: 'border-box',
-    fontSize: '14px'
+    fontSize: '14px',
+    background: '#fff',
+    color: '#0f172a'
   },
   submitBtn: {
     background: 'linear-gradient(135deg, #1f7a8c 0%, #2c5f8a 100%)',
     color: '#fff',
     border: 'none',
-    padding: '10px 16px',
-    borderRadius: '8px',
+    padding: '11px 16px',
+    borderRadius: '12px',
     cursor: 'pointer',
     fontWeight: '600',
     fontSize: '14px'
@@ -1504,7 +1602,7 @@ const styles = {
     border: '1px solid #dbeafe',
     background: '#f8fbff'
   },
-  subTitle: { margin: '0 0 10px 0', color: '#234', fontSize: '16px' },
+  subTitle: { margin: '0 0 10px 0', color: '#0f172a', fontSize: '16px', letterSpacing: '-0.01em' },
   pipelineInfoBox: {
     marginBottom: '12px',
     padding: '10px 12px',
@@ -1518,11 +1616,11 @@ const styles = {
   tableWrapper: {
     overflowX: 'auto',
     border: '1px solid #e2e8f0',
-    borderRadius: '10px',
+    borderRadius: '16px',
     background: '#fff'
   },
   table: { width: '100%', borderCollapse: 'collapse' },
-  tableHeadRow: { background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: '#fff' },
+  tableHeadRow: { background: 'linear-gradient(135deg, #1f7a8c 0%, #2c5f8a 100%)', color: '#fff' },
   th: { textAlign: 'left', padding: '12px 14px', fontSize: '14px', whiteSpace: 'nowrap' },
   td: { padding: '12px 14px', borderTop: '1px solid #edf2f7', verticalAlign: 'top', fontSize: '14px', color: '#334155' },
   tableRow: { background: '#fff' },
@@ -1530,7 +1628,7 @@ const styles = {
     width: '100%',
     boxSizing: 'border-box',
     border: '1px solid #cbd5e1',
-    borderRadius: '8px',
+    borderRadius: '10px',
     padding: '8px 10px',
     fontSize: '13px'
   },
@@ -1539,7 +1637,7 @@ const styles = {
     minHeight: '68px',
     boxSizing: 'border-box',
     border: '1px solid #cbd5e1',
-    borderRadius: '8px',
+    borderRadius: '10px',
     padding: '8px 10px',
     fontSize: '13px',
     resize: 'vertical'
@@ -1551,7 +1649,7 @@ const styles = {
     background: '#f8fbff',
     color: '#1f7a8c',
     padding: '8px 12px',
-    borderRadius: '8px',
+    borderRadius: '12px',
     cursor: 'pointer',
     fontWeight: '600',
     fontSize: '13px'
@@ -1561,7 +1659,7 @@ const styles = {
     background: '#fff5f5',
     color: '#b91c1c',
     padding: '8px 12px',
-    borderRadius: '8px',
+    borderRadius: '12px',
     cursor: 'pointer',
     fontWeight: '600',
     fontSize: '13px'
@@ -1572,7 +1670,7 @@ const styles = {
     whiteSpace: 'pre-wrap',
     background: '#f8fafc',
     border: '1px solid #e2e8f0',
-    borderRadius: '8px',
+    borderRadius: '12px',
     padding: '12px',
     marginTop: '8px',
     color: '#334155',

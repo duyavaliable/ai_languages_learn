@@ -1,6 +1,6 @@
 import { generateExplanation, generateExercises, generateExercisesForCourseSkill, refineExerciseSet, checkPronunciation } from '../services/aiService.js';
 import { translateText } from '../services/translationService.js';
-import { Course, Exercise } from '../models/index.js';
+import { Exercise } from '../models/index.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -67,11 +67,6 @@ export const generatePracticeExercises = async (req, res) => {
           base64: req.file.buffer.toString('base64'),
           mimeType: req.file.mimetype
         };
-      }
-
-      const course = await Course.findOne({ where: { id: course_id, is_deleted: false } });
-      if (!course) {
-        return res.status(400).json({ message: 'course_id is invalid or deleted' });
       }
 
       const exercises = await generateExercisesForCourseSkill({

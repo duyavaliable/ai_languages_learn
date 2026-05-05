@@ -12,7 +12,7 @@ function AdminContentManager() {
   const navigate = useNavigate();
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
-  const [tab, setTab] = useState('courses');
+  const [tab, setTab] = useState('exercises');
 
   // ── Languages ──
   const [languages, setLanguages] = useState([]);
@@ -275,6 +275,8 @@ function AdminContentManager() {
     }
   };
 
+  const exerciseCount = exercises.length;
+
   const langName = (id) => languages.find(l => l.id === id)?.name ?? id;
   const courseName = (id) => courses.find(c => c.id === Number(id))?.name ?? id;
 
@@ -284,7 +286,7 @@ function AdminContentManager() {
       <div style={styles.header}>
         <div style={styles.headerLeft}>
           <button onClick={() => navigate('/')} style={styles.backBtn}>← Quay lại</button>
-          <span style={styles.logo}>📚 Quản lý nội dung</span>
+          <span style={styles.logo}>Quản lý nội dung</span>
         </div>
         <span style={styles.welcomeText}>
           {currentUser.role === 'admin' ? 'Admin' : 'Teacher'}: <strong>{currentUser.username}</strong>
@@ -292,30 +294,34 @@ function AdminContentManager() {
       </div>
 
       <div style={styles.content}>
+        <section style={styles.heroCard}>
+          <div>
+            <p style={styles.heroEyebrow}>Content dashboard</p>
+            <h1 style={styles.heroTitle}>Quản lý nội dung</h1>
+            <p style={styles.heroDescription}>
+              Tập trung vào exercise trong một workspace trực quan, gọn và dễ thao tác.
+            </p>
+          </div>
+          <div style={styles.heroStats}>
+            <div style={styles.statCard}>
+              <span style={styles.statLabel}>Exercise</span>
+              <strong style={styles.statValue}>{exerciseCount}</strong>
+            </div>
+          </div>
+        </section>
+
         {/* Tabs */}
         <div style={styles.tabBar}>
-          <button
-            style={tab === 'courses' ? styles.tabActive : styles.tab}
-            onClick={() => setTab('courses')}
-          >
-            🗂 Khóa học
-          </button>
-          <button
-            style={tab === 'lessons' ? styles.tabActive : styles.tab}
-            onClick={handleTabLesson}
-          >
-            📖 Bài học
-          </button>
           <button
             style={tab === 'exercises' ? styles.tabActive : styles.tab}
             onClick={handleTabExercises}
           >
-            🧪 Exercise
+            Exercise
           </button>
         </div>
 
         {/* ═══ COURSES TAB ═══ */}
-        {tab === 'courses' && (
+        {false && tab === 'courses' && (
           <div>
             <div style={styles.topBar}>
               <h2 style={styles.sectionTitle}>Danh sách khóa học ({courses.length})</h2>
@@ -470,7 +476,7 @@ function AdminContentManager() {
         )}
 
         {/* ═══ LESSONS TAB ═══ */}
-        {tab === 'lessons' && (
+        {false && tab === 'lessons' && (
           <div>
             <div style={styles.topBar}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -641,18 +647,6 @@ function AdminContentManager() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                 <h2 style={styles.sectionTitle}>Exercise ({exercises.length})</h2>
                 <select
-                  style={{ ...styles.input, width: '240px', margin: 0 }}
-                  value={filterExerciseCourseId}
-                  onChange={(e) => {
-                    const nextCourseId = e.target.value;
-                    setFilterExerciseCourseId(nextCourseId);
-                    fetchExercises(nextCourseId, filterExerciseSkill);
-                  }}
-                >
-                  <option value="">-- Tất cả khóa học --</option>
-                  {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-                <select
                   style={{ ...styles.input, width: '180px', margin: 0 }}
                   value={filterExerciseSkill}
                   onChange={(e) => {
@@ -677,9 +671,8 @@ function AdminContentManager() {
                     <tr style={styles.tableHeadRow}>
                       <th style={styles.th}>STT</th>
                       <th style={styles.th}>Tiêu đề</th>
-                      <th style={styles.th}>Khóa học</th>
+                      <th style={styles.th}>Mã khóa</th>
                       <th style={styles.th}>Kỹ năng</th>
-                      <th style={styles.th}>CEFR</th>
                       <th style={styles.th}>Trạng thái</th>
                       <th style={styles.th}>Thao tác</th>
                     </tr>
@@ -689,9 +682,8 @@ function AdminContentManager() {
                       <tr key={e.id} style={styles.tableRow}>
                         <td style={styles.td}>{idx + 1}</td>
                         <td style={styles.td}><strong>{e.title}</strong></td>
-                        <td style={styles.td}>{courseName(e.course_id)}</td>
+                        <td style={styles.td}>{e.course_id}</td>
                         <td style={styles.td}>{String(e.skill_type || '').toUpperCase()}</td>
-                        <td style={styles.td}>{String(e.cefr_level || '').toUpperCase()}</td>
                         <td style={styles.td}>
                           {e.is_deleted ? (
                             <span style={styles.deletedBadge}>Đã xóa mềm</span>
@@ -751,102 +743,132 @@ const levelBadge = (level) => ({
 });
 
 const styles = {
-  wrapper: { fontFamily: 'sans-serif', minHeight: '100vh', background: '#f5f6fa' },
+  wrapper: {
+    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+    minHeight: '100vh',
+    background: 'radial-gradient(circle at top left, #eef4ff 0%, #f7f9ff 35%, #eef2ff 100%)'
+  },
   header: {
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    background: 'rgba(255,255,255,0.84)',
+    backdropFilter: 'blur(18px)',
+    borderBottom: '1px solid rgba(148,163,184,0.18)',
     padding: '16px 32px', display: 'flex', justifyContent: 'space-between',
-    alignItems: 'center', color: '#fff'
+    alignItems: 'center', color: '#0f172a', boxShadow: '0 8px 30px rgba(15,23,42,0.06)'
   },
   headerLeft: { display: 'flex', alignItems: 'center', gap: '16px' },
   backBtn: {
-    background: 'rgba(255,255,255,0.2)', color: '#fff',
-    border: '1px solid rgba(255,255,255,0.4)', padding: '7px 16px',
-    borderRadius: '6px', cursor: 'pointer', fontSize: '14px', fontWeight: '600'
+    background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)', color: '#fff',
+    border: 'none', padding: '7px 16px',
+    borderRadius: '999px', cursor: 'pointer', fontSize: '14px', fontWeight: '600'
   },
-  logo: { fontSize: '20px', fontWeight: 'bold' },
-  welcomeText: { fontSize: '14px' },
-  content: { maxWidth: '1100px', margin: '0 auto', padding: '28px 24px' },
-  tabBar: { display: 'flex', gap: '8px', marginBottom: '24px', borderBottom: '2px solid #e2e8f0', paddingBottom: '0' },
+  logo: { fontSize: '20px', fontWeight: '800', letterSpacing: '-0.02em' },
+  welcomeText: { fontSize: '14px', color: '#475569' },
+  content: { maxWidth: '1280px', margin: '0 auto', padding: '28px 24px 40px' },
+  heroCard: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1.3fr) minmax(280px, 0.9fr)',
+    gap: '20px',
+    padding: '24px 28px',
+    marginBottom: '20px',
+    borderRadius: '28px',
+    background: 'linear-gradient(135deg, rgba(79,70,229,0.96) 0%, rgba(124,58,237,0.92) 52%, rgba(59,130,246,0.9) 100%)',
+    color: '#fff',
+    boxShadow: '0 24px 60px rgba(79,70,229,0.22)'
+  },
+  heroEyebrow: { margin: 0, fontSize: '12px', fontWeight: '700', letterSpacing: '0.24em', textTransform: 'uppercase', opacity: 0.85 },
+  heroTitle: { margin: '8px 0 10px', fontSize: '30px', lineHeight: 1.1, letterSpacing: '-0.04em' },
+  heroDescription: { margin: 0, maxWidth: '680px', color: 'rgba(255,255,255,0.86)', fontSize: '14px', lineHeight: 1.7 },
+  heroStats: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', alignSelf: 'stretch' },
+  statCard: {
+    borderRadius: '20px',
+    background: 'rgba(255,255,255,0.16)',
+    border: '1px solid rgba(255,255,255,0.18)',
+    padding: '16px'
+  },
+  statLabel: { display: 'block', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.16em', opacity: 0.82, marginBottom: '10px' },
+  statValue: { fontSize: '28px', lineHeight: 1, fontWeight: '800' },
+  tabBar: { display: 'flex', gap: '10px', marginBottom: '24px', borderBottom: '1px solid rgba(148,163,184,0.18)', paddingBottom: '0' },
   tab: {
-    background: 'none', border: 'none', padding: '10px 20px', cursor: 'pointer',
-    fontSize: '15px', fontWeight: '600', color: '#888', borderBottom: '2px solid transparent', marginBottom: '-2px'
+    background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(148,163,184,0.16)', padding: '10px 20px', cursor: 'pointer',
+    fontSize: '15px', fontWeight: '700', color: '#64748b', borderBottom: 'none', marginBottom: '-1px', borderTopLeftRadius: '14px', borderTopRightRadius: '14px'
   },
   tabActive: {
-    background: 'none', border: 'none', padding: '10px 20px', cursor: 'pointer',
-    fontSize: '15px', fontWeight: '600', color: '#667eea', borderBottom: '2px solid #667eea', marginBottom: '-2px'
+    background: '#fff', border: '1px solid rgba(148,163,184,0.16)', padding: '10px 20px', cursor: 'pointer',
+    fontSize: '15px', fontWeight: '800', color: '#4f46e5', borderBottom: 'none', marginBottom: '-1px', borderTopLeftRadius: '14px', borderTopRightRadius: '14px', boxShadow: '0 -2px 18px rgba(15,23,42,0.04)'
   },
-  topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' },
-  sectionTitle: { color: '#333', margin: 0, fontSize: '18px' },
+  topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '16px', flexWrap: 'wrap' },
+  sectionTitle: { color: '#0f172a', margin: 0, fontSize: '18px', fontWeight: '800', letterSpacing: '-0.02em' },
   createBtn: {
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
     color: '#fff', border: 'none', padding: '10px 22px',
-    borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '14px'
+    borderRadius: '999px', cursor: 'pointer', fontWeight: '600', fontSize: '14px'
   },
   secondaryBtn: {
-    background: '#edf2f7', color: '#4a5568', border: '1px solid #cbd5e0',
-    padding: '10px 16px', borderRadius: '8px', cursor: 'pointer',
+    background: '#fff', color: '#334155', border: '1px solid rgba(148,163,184,0.22)',
+    padding: '10px 16px', borderRadius: '999px', cursor: 'pointer',
     fontWeight: '600', fontSize: '14px'
   },
   formCard: {
-    background: '#fff', borderRadius: '12px', padding: '24px',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.08)', marginBottom: '20px',
-    borderLeft: '4px solid #667eea'
+    background: 'rgba(248,250,252,0.92)', borderRadius: '22px', padding: '24px',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.6)', marginBottom: '20px',
+    border: '1px solid rgba(148,163,184,0.18)'
   },
-  formTitle: { color: '#333', marginTop: 0, marginBottom: '18px', fontSize: '16px' },
+  formTitle: { color: '#0f172a', marginTop: 0, marginBottom: '18px', fontSize: '16px', fontWeight: '700' },
   formRow: { display: 'flex', gap: '16px', marginBottom: '14px' },
-  label: { display: 'block', color: '#555', fontSize: '13px', fontWeight: '600', marginBottom: '6px' },
+  label: { display: 'block', color: '#475569', fontSize: '13px', fontWeight: '700', marginBottom: '6px' },
   input: {
-    width: '100%', padding: '10px 14px', borderRadius: '8px',
-    border: '1px solid #ddd', fontSize: '14px', boxSizing: 'border-box',
-    outline: 'none', color: '#333', fontFamily: 'sans-serif'
+    width: '100%', padding: '10px 14px',
+    border: '1px solid rgba(148,163,184,0.22)', fontSize: '14px', boxSizing: 'border-box',
+    outline: 'none', color: '#0f172a', fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+    background: '#fff', borderRadius: '14px'
   },
   submitBtn: {
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
     color: '#fff', border: 'none', padding: '10px 26px',
-    borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '14px'
+    borderRadius: '999px', cursor: 'pointer', fontWeight: '600', fontSize: '14px'
   },
   cancelBtn: {
-    background: '#f7f7f7', color: '#555', border: '1px solid #ddd',
-    padding: '10px 20px', borderRadius: '8px', cursor: 'pointer',
+    background: '#fff', color: '#475569', border: '1px solid rgba(148,163,184,0.22)',
+    padding: '10px 20px', borderRadius: '999px', cursor: 'pointer',
     fontWeight: '600', fontSize: '14px'
   },
   successBanner: {
-    background: '#f0fff4', color: '#276749', border: '1px solid #c6f6d5',
-    padding: '10px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px'
+    background: '#ecfdf5', color: '#166534', border: '1px solid #bbf7d0',
+    padding: '10px 16px', borderRadius: '14px', marginBottom: '16px', fontSize: '14px'
   },
   errorBanner: {
-    background: '#fff5f5', color: '#c53030', border: '1px solid #fed7d7',
-    padding: '10px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px'
+    background: '#fff1f2', color: '#be123c', border: '1px solid #fecdd3',
+    padding: '10px 16px', borderRadius: '14px', marginBottom: '16px', fontSize: '14px'
   },
-  tableWrapper: { background: '#fff', borderRadius: '12px', boxShadow: '0 2px 10px rgba(0,0,0,0.08)', overflow: 'hidden' },
+  tableWrapper: { background: 'rgba(255,255,255,0.86)', borderRadius: '20px', boxShadow: '0 12px 30px rgba(15,23,42,0.06)', overflow: 'hidden', border: '1px solid rgba(148,163,184,0.14)' },
   table: { width: '100%', borderCollapse: 'collapse' },
-  tableHeadRow: { background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' },
-  th: { padding: '13px 16px', color: '#fff', textAlign: 'left', fontSize: '13px', fontWeight: '600' },
-  tableRow: { borderBottom: '1px solid #f0f0f0' },
-  td: { padding: '12px 16px', fontSize: '14px', color: '#333' },
-  emptyCell: { padding: '32px', textAlign: 'center', color: '#888' },
+  tableHeadRow: { background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' },
+  th: { padding: '13px 16px', color: '#fff', textAlign: 'left', fontSize: '13px', fontWeight: '700' },
+  tableRow: { borderBottom: '1px solid rgba(226,232,240,0.9)' },
+  td: { padding: '12px 16px', fontSize: '14px', color: '#0f172a' },
+  emptyCell: { padding: '32px', textAlign: 'center', color: '#64748b' },
   actionGroup: { display: 'flex', gap: '8px' },
   editBtn: {
-    background: '#ebf4ff', color: '#2b6cb0', border: '1px solid #bee3f8',
-    padding: '5px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600'
+    background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe',
+    padding: '5px 12px', borderRadius: '10px', cursor: 'pointer', fontSize: '12px', fontWeight: '600'
   },
   deleteBtn: {
-    background: '#fff5f5', color: '#c53030', border: '1px solid #fed7d7',
-    padding: '5px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600'
+    background: '#fff1f2', color: '#be123c', border: '1px solid #fecdd3',
+    padding: '5px 12px', borderRadius: '10px', cursor: 'pointer', fontSize: '12px', fontWeight: '600'
   },
   restoreBtn: {
-    background: '#f0fff4', color: '#276749', border: '1px solid #c6f6d5',
-    padding: '5px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600'
+    background: '#ecfdf5', color: '#166534', border: '1px solid #bbf7d0',
+    padding: '5px 12px', borderRadius: '10px', cursor: 'pointer', fontSize: '12px', fontWeight: '600'
   },
   activeBadge: {
-    background: '#ebf8ff', color: '#2b6cb0', border: '1px solid #bee3f8',
-    padding: '3px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '600'
+    background: '#dbeafe', color: '#1d4ed8', border: '1px solid #bfdbfe',
+    padding: '3px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: '600'
   },
   deletedBadge: {
-    background: '#fff5f5', color: '#c53030', border: '1px solid #fed7d7',
-    padding: '3px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '600'
+    background: '#fff1f2', color: '#be123c', border: '1px solid #fecdd3',
+    padding: '3px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: '600'
   },
-  statusText: { color: '#888', textAlign: 'center', padding: '40px' }
+  statusText: { color: '#64748b', textAlign: 'center', padding: '40px' }
 };
 
 export default AdminContentManager;

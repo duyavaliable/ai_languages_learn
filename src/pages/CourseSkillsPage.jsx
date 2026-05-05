@@ -15,6 +15,7 @@ function CourseSkillsPage() {
   const [course, setCourse] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [loadingSkill, setLoadingSkill] = useState('');
 
   useEffect(() => {
     api.get(`/courses/${courseId}`)
@@ -27,6 +28,25 @@ function CourseSkillsPage() {
         setLoading(false);
       });
   }, [courseId]);
+
+  const openFirstExercise = async (skillId) => {
+    try {
+      setLoadingSkill(skillId);
+      const res = await api.get(`/exercises?courseId=${courseId}&skill=${skillId}`);
+      const exercises = Array.isArray(res.data) ? res.data : [];
+
+      if (exercises.length > 0) {
+        navigate(`/courses/${courseId}/skills/${skillId}/exercises/${exercises[0].id}`);
+        return;
+      }
+
+      setError('Chưa có bài tập nào cho kỹ năng này');
+    } catch (_err) {
+      setError('Không tải được bài tập của kỹ năng này');
+    } finally {
+      setLoadingSkill('');
+    }
+  };
 
   return (
     <div style={styles.wrapper}>
@@ -42,7 +62,7 @@ function CourseSkillsPage() {
           <>
             <div style={styles.courseCard}>
               <h3 style={styles.courseName}>{course.name}</h3>
-              <p style={styles.courseMeta}>Trình độ: {String(course.level || '').toUpperCase()} | Ngôn ngữ: {course.language?.name || 'Tiếng Anh'}</p>
+              <p style={styles.courseMeta}>Ngôn ngữ: {course.language?.name || 'Tiếng Anh'}</p>
               {course.description && <p style={styles.courseDesc}>{course.description}</p>}
             </div>
 
@@ -51,10 +71,11 @@ function CourseSkillsPage() {
                 <button
                   key={skill.id}
                   style={styles.skillCard}
-                  onClick={() => navigate(`/courses/${courseId}/skills/${skill.id}/exercises`)}
+                  onClick={() => openFirstExercise(skill.id)}
+                  disabled={loadingSkill === skill.id}
                 >
                   <span style={styles.skillIcon}>{skill.icon}</span>
-                  <span style={styles.skillText}>{skill.label}</span>
+                  <span style={styles.skillText}>{loadingSkill === skill.id ? 'Đang mở...' : skill.label}</span>
                 </button>
               ))}
             </div>
