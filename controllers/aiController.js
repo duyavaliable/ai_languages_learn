@@ -93,7 +93,6 @@ export const generatePracticeExercises = async (req, res) => {
         course_id,
         title: exerciseName,
         skill_type: normalizedSkill,
-        cefr_level: normalizedLevel,
         reading_passage: exerciseContent.readingPassage || null,
         task_prompt: exerciseContent.taskPrompt || null,
         sample_answer: exerciseContent.sampleAnswer || null,
@@ -119,8 +118,7 @@ export const generatePracticeExercises = async (req, res) => {
         exerciseTitle: createdExercise.title,
         audioUrl: audioUpload?.audioUrl || null,
         courseId: Number(course_id),
-        skill: normalizedSkill,
-        cefrLevel: normalizedLevel
+        skill: normalizedSkill
       });
     }
 
@@ -167,8 +165,6 @@ export const refinePracticeExercise = async (req, res) => {
     const currentExercise = {
       title: exercise.title,
       skill: exercise.skill_type,
-      cefrLevel: exercise.cefr_level,
-      topic: exercise.topic,
       readingPassage: exercise.reading_passage,
       taskPrompt: exercise.task_prompt,
       sampleAnswer: exercise.sample_answer,
@@ -177,7 +173,7 @@ export const refinePracticeExercise = async (req, res) => {
 
     const revised = await refineExerciseSet({
       skill: exercise.skill_type,
-      cefrLevel: exercise.cefr_level,
+      cefrLevel: undefined,
       feedback,
       currentExercise
     });

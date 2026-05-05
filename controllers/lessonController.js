@@ -7,16 +7,9 @@ const normalizeSkillType = (skill) => {
   return supported.includes(value) ? value : null;
 };
 
-const normalizeCefrLevel = (level) => {
-  if (!level) return null;
-  const value = String(level).trim().toUpperCase();
-  const supported = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
-  return supported.includes(value) ? value : null;
-};
-
 export const getLessons = async (req, res) => {
   try {
-    const { languageId, courseId, skill, exerciseOnly, cefrLevel } = req.query;
+    const { languageId, courseId, skill, exerciseOnly } = req.query;
     const where = { is_deleted: false };
 
     const resolvedLanguageId = languageId || courseId;
@@ -34,14 +27,6 @@ export const getLessons = async (req, res) => {
 
     if (exerciseOnly === 'true') {
       where.is_ai_exercise = true;
-    }
-
-    const normalizedCefr = normalizeCefrLevel(cefrLevel);
-    if (cefrLevel) {
-      if (!normalizedCefr) {
-        return res.status(400).json({ message: 'cefrLevel must be one of A1, A2, B1, B2, C1, C2' });
-      }
-      where.cefr_level = normalizedCefr;
     }
 
     const lessons = await Lesson.findAll({
@@ -89,7 +74,6 @@ export const createLesson = async (req, res) => {
       content,
       lesson_order,
       skill_type,
-      cefr_level,
       is_ai_exercise
     } = req.body;
 
@@ -104,18 +88,12 @@ export const createLesson = async (req, res) => {
       return res.status(400).json({ message: 'skill_type must be listening, speaking, reading or writing' });
     }
 
-    const normalizedCefrLevel = normalizeCefrLevel(cefr_level);
-    if (cefr_level && !normalizedCefrLevel) {
-      return res.status(400).json({ message: 'cefr_level must be one of A1, A2, B1, B2, C1, C2' });
-    }
-
     const lesson = await Lesson.create({
       language_id: resolvedLanguageId,
       title,
       content,
       lesson_order: lesson_order || 1,
       skill_type: normalizedSkillType,
-      cefr_level: normalizedCefrLevel,
       is_ai_exercise: Boolean(is_ai_exercise),
       is_deleted: false
     });
@@ -144,14 +122,6 @@ export const updateLesson = async (req, res) => {
         return res.status(400).json({ message: 'skill_type must be listening, speaking, reading or writing' });
       }
       req.body.skill_type = normalizedSkillType;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'cefr_level')) {
-      const normalizedCefrLevel = normalizeCefrLevel(req.body.cefr_level);
-      if (req.body.cefr_level && !normalizedCefrLevel) {
-        return res.status(400).json({ message: 'cefr_level must be one of A1, A2, B1, B2, C1, C2' });
-      }
-      req.body.cefr_level = normalizedCefrLevel;
     }
 
     await lesson.update(req.body);

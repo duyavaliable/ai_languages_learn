@@ -12,6 +12,15 @@ function parseQuestions(questionsJson) {
   }
 }
 
+function extractWritingPromptFromQuestions(questionsJson) {
+  const parsed = parseQuestions(questionsJson);
+  if (!Array.isArray(parsed) || parsed.length === 0) return '';
+  const first = parsed[0] || {};
+  if (typeof first?.prompt === 'string' && first.prompt.trim()) return first.prompt.trim();
+  if (typeof first?.question === 'string' && first.question.trim()) return first.question.trim();
+  return '';
+}
+
 function formatTime(totalSeconds) {
   const mins = Math.floor(Math.max(0, totalSeconds) / 60);
   const secs = Math.max(0, totalSeconds) % 60;
@@ -73,6 +82,9 @@ function ExerciseAttemptPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [speechTranscript, setSpeechTranscript] = useState('');
   const [speakingReportOpen, setSpeakingReportOpen] = useState(false);
+  const [writingStructureTips, setWritingStructureTips] = useState([]);
+  const [writingSampleAnswer, setWritingSampleAnswer] = useState('');
+  const [writingAiLoading, setWritingAiLoading] = useState(false);
 
   const goBack = () => {
     navigate(-1);
@@ -112,9 +124,13 @@ function ExerciseAttemptPage() {
   }, [submitted, loading, secondsLeft]);
 
   const questions = useMemo(() => parseQuestions(exercise?.questions_json || exercise?.questions || []), [exercise]);
+  const writingPromptFromQuestions = useMemo(
+    () => extractWritingPromptFromQuestions(exercise?.questions_json || exercise?.questions || []),
+    [exercise]
+  );
   const readingPassage = String(exercise?.reading_passage || '').trim();
   const readingPassageDisplay = useMemo(() => extractIntroText(readingPassage), [readingPassage]);
-  const taskPrompt = String(exercise?.task_prompt || exercise?.prompt || '').trim();
+  const taskPrompt = String(exercise?.task_prompt || exercise?.taskPrompt || writingPromptFromQuestions || exercise?.prompt || exercise?.reading_passage || '').trim();
   const audioUrl = String(exercise?.audio_url || '').trim();
   const displayTitle = exercise?.title || 'Bài tập';
   const isReading = exercise?.skill_type === 'reading';
@@ -154,6 +170,27 @@ function ExerciseAttemptPage() {
   const writingMinWords = Number(exercise?.min_words || exercise?.minWords || 0);
   const writingTargetWords = Number(exercise?.target_words || exercise?.targetWords || 250);
   const writingProgress = Math.min(100, writingTargetWords > 0 ? (wordCount / writingTargetWords) * 100 : 0);
+  const hasWritingSample = submitted && Boolean(String(writingSampleAnswer || exercise?.sample_answer || exercise?.sampleAnswer || '').trim());
+
+  useEffect(() => {
+    if (!isWriting || !exercise) return;
+    if (!taskPrompt) {
+      console.error('[ExerciseAttemptPage] writing prompt missing', {
+        exerciseId,
+        skillType: exercise?.skill_type,
+        title: exercise?.title,
+        task_prompt: exercise?.task_prompt,
+        taskPromptCamel: exercise?.taskPrompt,
+        reading_passage: exercise?.reading_passage,
+        prompt: exercise?.prompt
+      });
+    } else {
+      console.log('[ExerciseAttemptPage] writing prompt loaded', {
+        exerciseId,
+        promptLength: taskPrompt.length
+      });
+    }
+  }, [isWriting, exercise, taskPrompt, exerciseId]);
 
   const score = useMemo(() => {
     if (!submitted || questions.length === 0 || isWriting) return 0;
@@ -167,11 +204,50 @@ function ExerciseAttemptPage() {
   const displaySkill = String(skill || exercise?.skill_type || '').toLowerCase();
   const hasQuestions = questions.length > 0;
 
-  const handleSubmit = () => {
+  useEffect(() => {
+    if (!isWriting || !exerciseId || !taskPrompt) return;
+    let cancelled = false;
+
+    const fetchWritingTips = async () => {
+      try {
+        const res = await api.post(`/exercises/${exerciseId}/writing-assist`, {
+          includeSampleAnswer: false
+        });
+        if (cancelled) return;
+        const tips = Array.isArray(res.data?.structureTips) ? res.data.structureTips : [];
+        setWritingStructureTips(tips);
+      } catch (_err) {
+        if (!cancelled) setWritingStructureTips([]);
+      }
+    };
+
+    fetchWritingTips();
+    return () => {
+      cancelled = true;
+    };
+  }, [isWriting, exerciseId, taskPrompt]);
+
+  const handleSubmit = async () => {
     setSubmitted(true);
     const audio = audioRef.current;
     if (audio) audio.pause();
     setIsPlaying(false);
+
+    if (!isWriting || writingAiLoading) return;
+    setWritingAiLoading(true);
+    try {
+      const res = await api.post(`/exercises/${exerciseId}/writing-assist`, {
+        includeSampleAnswer: true,
+        submissionText: textResponse
+      });
+      const tips = Array.isArray(res.data?.structureTips) ? res.data.structureTips : [];
+      setWritingStructureTips(tips);
+      setWritingSampleAnswer(String(res.data?.sampleAnswer || '').trim());
+    } catch (_err) {
+      setWritingSampleAnswer('');
+    } finally {
+      setWritingAiLoading(false);
+    }
   };
 
   const handlePlayPause = () => {
@@ -252,7 +328,7 @@ function ExerciseAttemptPage() {
             <p className="text-xs text-muted-foreground sm:text-sm">
               Kỹ năng: <span className="font-semibold uppercase text-foreground">{displaySkill}</span>
               <span className="mx-2">•</span>
-              {submitted ? (isWriting ? `Đã nộp | ${wordCount} từ` : `Đã nộp | ${score}/${questions.length}`) : `Còn lại ${formatTime(secondsLeft)}`}
+              {submitted ? (isWriting ? `Đã nộp | ${wordCount} từ` : `Submitted | ${score}/${questions.length}`) : `Còn lại ${formatTime(secondsLeft)}`}
             </p>
           </div>
           <button onClick={goBack} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-smooth hover:border-primary hover:text-primary">
@@ -639,15 +715,9 @@ function ExerciseAttemptPage() {
           <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
             <section className="overflow-hidden rounded-[32px] border border-border bg-card shadow-card">
               <div className="grid gap-5 border-b border-border bg-secondary/40 p-5 sm:p-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
-                <div className="overflow-hidden rounded-[28px] bg-gradient-to-br from-slate-900 via-indigo-700 to-cyan-600 p-3 shadow-elegant">
-                  <img src="/images/writing-illustration.png" alt="Writing illustration" className="h-full w-full rounded-[22px] object-cover opacity-95" />
-                </div>
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Writing task</p>
                   <h2 className="mt-1 text-2xl font-bold sm:text-3xl">{exercise?.title || 'Writing task'}</h2>
-                  <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/70">
-                    Khung viết được mở rộng theo chiều ngang để người học có cảm giác như đang làm việc trong một editor thực thụ.
-                  </p>
                 </div>
               </div>
               <div className="space-y-5 p-5 sm:p-6">
@@ -671,11 +741,8 @@ function ExerciseAttemptPage() {
                   <div className={`h-2 rounded-full transition-smooth ${wordCount >= writingMinWords ? 'gradient-success' : 'gradient-primary'}`} style={{ width: `${writingProgress}%` }} />
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <button onClick={goBack} className="rounded-full border border-border bg-background px-4 py-2.5 text-sm font-semibold transition-smooth hover:border-primary hover:text-primary">
-                    Save & Exit
-                  </button>
-                  <button onClick={handleSubmit} disabled={submitted || (writingMinWords > 0 && wordCount < writingMinWords)} className="rounded-full gradient-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-elegant transition-smooth hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-50">
-                    {submitted ? 'Đã nộp' : 'Submit Essay'}
+                  <button onClick={handleSubmit} disabled={submitted || writingAiLoading || (writingMinWords > 0 && wordCount < writingMinWords)} className="rounded-full gradient-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-elegant transition-smooth hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-50">
+                    {submitted ? 'Đã nộp' : 'Nộp bài'}
                   </button>
                 </div>
               </div>
@@ -690,12 +757,12 @@ function ExerciseAttemptPage() {
               <div className="rounded-[24px] border border-border bg-card p-5 shadow-card">
                 <div className="mb-3 text-sm font-semibold">Structure</div>
                 <div className="space-y-2 text-sm text-muted-foreground">
-                  {[
+                  {(writingStructureTips.length > 0 ? writingStructureTips : [
                     'Introduction: paraphrase the topic and state your opinion.',
                     'Body 1: present the first main reason with an example.',
                     'Body 2: present the second main reason or counterpoint.',
                     'Conclusion: restate your view clearly and concisely.',
-                  ].map((item) => (
+                  ]).map((item) => (
                     <div key={item} className="rounded-2xl border border-border bg-secondary/35 px-3 py-2 leading-6">{item}</div>
                   ))}
                 </div>
@@ -704,16 +771,10 @@ function ExerciseAttemptPage() {
               <div className="rounded-[24px] border border-border bg-card p-5 shadow-card">
                 <div className="mb-3 text-sm font-semibold">Sample answer</div>
                 <p className="text-sm leading-7 text-muted-foreground">
-                  {String(exercise?.sample_answer || exercise?.sampleAnswer || '').trim() || 'Chưa có bài mẫu cho bài viết này.'}
+                  {hasWritingSample
+                    ? (String(writingSampleAnswer || exercise?.sample_answer || exercise?.sampleAnswer || '').trim() || 'Chưa có bài mẫu cho bài viết này.')
+                    : (writingAiLoading ? 'AI đang tạo bài mẫu...' : 'Nhấn Submit để xem bài mẫu do AI tạo.')}
                 </p>
-              </div>
-
-              <div className="rounded-[24px] border border-border bg-card p-5 shadow-card">
-                <div className="mb-3 text-sm font-semibold">Timer</div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-2 font-mono text-sm font-semibold">
-                  <Clock3 className="h-4 w-4" />
-                  {formatTime(secondsLeft)}
-                </div>
               </div>
             </aside>
           </div>
@@ -722,7 +783,7 @@ function ExerciseAttemptPage() {
 
       
 
-      {!loading && !error && isListening && (
+      {!loading && !error && hasQuestions && !isWriting && !isSpeaking && (
         <footer className="sticky bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur-xl shadow-sticky">
           <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
             <div className="flex flex-wrap items-center gap-2">

@@ -1,11 +1,25 @@
 import { Exercise, Lesson } from '../models/index.js';
 import { parseExerciseParts, extractQuestionsFromPart, extractPassageTextFromPart } from '../services/exerciseImportService.js';
+import { generateGeminiText } from '../services/aiService.js';
 
 const normalizeSkillType = (skill) => {
   if (!skill) return null;
   const value = String(skill).trim().toLowerCase();
   const supported = ['listening', 'speaking', 'reading', 'writing'];
   return supported.includes(value) ? value : null;
+};
+
+const extractPromptFromQuestionsJson = (questionsJson) => {
+  try {
+    const parsed = JSON.parse(String(questionsJson || '[]'));
+    if (!Array.isArray(parsed) || parsed.length === 0) return '';
+    const first = parsed[0] || {};
+    if (typeof first?.prompt === 'string' && first.prompt.trim()) return first.prompt.trim();
+    if (typeof first?.question === 'string' && first.question.trim()) return first.question.trim();
+    return '';
+  } catch (_err) {
+    return '';
+  }
 };
 
 export const getExercises = async (req, res) => {
@@ -48,6 +62,16 @@ export const getExerciseById = async (req, res) => {
 
     if (!exercise) {
       return res.status(404).json({ message: 'Exercise not found' });
+    }
+
+    if (String(exercise.skill_type || '').toLowerCase() === 'writing') {
+      console.log('[getExerciseById] writing payload', {
+        id: exercise.id,
+        title: exercise.title,
+        taskPromptLen: String(exercise.task_prompt || '').trim().length,
+        readingPassageLen: String(exercise.reading_passage || '').trim().length,
+        sampleAnswerLen: String(exercise.sample_answer || '').trim().length
+      });
     }
 
     return res.json(exercise);
@@ -178,7 +202,6 @@ export const createExercisesFromParts = async (req, res) => {
     }
 
     const normalizedSkill = normalizeSkillType(skill) || 'reading';
-    const normalizedLevel = 'A2';
 
     let resolvedCourseId = Number(course_id);
     if (!Number.isFinite(resolvedCourseId) || resolvedCourseId <= 0) {
@@ -214,23 +237,38 @@ export const createExercisesFromParts = async (req, res) => {
       const fullPartText = String(p.content || '').trim();
       const introText = extractPassageTextFromPart(fullPartText);
       const reading_passage = normalizedSkill === 'reading' ? (introText || null) : null;
-      const task_prompt = normalizedSkill === 'listening' ? (introText || null) : null;
+      const task_prompt = (normalizedSkill === 'listening' || normalizedSkill === 'writing' || normalizedSkill === 'speaking')
+        ? (introText || fullPartText || null)
+        : null;
       const sample_answer = null;
+
+      if (normalizedSkill === 'writing') {
+        console.log('[createExercisesFromParts] writing part debug', {
+          partIndex: i,
+          fullPartTextLen: fullPartText.length,
+          introTextLen: introText.length,
+          taskPromptLen: String(task_prompt || '').trim().length,
+          title: String(p.title || '').trim()
+        });
+      }
       
       // Parse questions, using AI for reading answers if needed
       const questions = await extractQuestionsFromPart(fullPartText, {
         skill: normalizedSkill,
         useAiForAnswers: normalizedSkill === 'reading'
       });
-      
-      const questions_json = JSON.stringify(questions);
+
+      // Writing prompt must be persisted in questions_json as requested.
+      const questionsPayload = normalizedSkill === 'writing'
+        ? [{ question: task_prompt || fullPartText, options: [], correctAnswer: '', explanation: '' }]
+        : questions;
+      const questions_json = JSON.stringify(questionsPayload);
       const time_limit_sec = (normalizedSkill === 'writing' || normalizedSkill === 'speaking') ? 900 : 300;
 
       const row = await Exercise.create({
         course_id: resolvedCourseId,
         title: name,
         skill_type: normalizedSkill,
-        cefr_level: normalizedLevel,
         reading_passage,
         task_prompt,
         sample_answer,
@@ -245,14 +283,88 @@ export const createExercisesFromParts = async (req, res) => {
         exerciseTitle: name,
         readingPassage: reading_passage,
         taskPrompt: task_prompt,
-        questions,
-        questionCount: questions.length
+        questions: questionsPayload,
+        questionCount: questionsPayload.length
       });
+
+      if (normalizedSkill === 'writing') {
+        console.log('[createExercisesFromParts] writing row created', {
+          exerciseId: row.id,
+          dbTaskPromptLen: String(row.task_prompt || '').trim().length
+        });
+      }
     }
 
     return res.json({ created });
   } catch (error) {
     console.error('[createExercisesFromParts] Error:', error);
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+export const generateWritingAssist = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { submissionText = '', includeSampleAnswer = false } = req.body || {};
+
+    const exercise = await Exercise.findOne({
+      where: { id, is_deleted: false }
+    });
+
+    if (!exercise) {
+      return res.status(404).json({ message: 'Exercise not found' });
+    }
+
+    if (String(exercise.skill_type || '').toLowerCase() !== 'writing') {
+      return res.status(400).json({ message: 'This endpoint is only for writing exercises' });
+    }
+
+    const promptFromQuestions = extractPromptFromQuestionsJson(exercise.questions_json);
+    const taskPrompt = String(exercise.task_prompt || promptFromQuestions || exercise.reading_passage || '').trim();
+    if (!taskPrompt) {
+      return res.status(400).json({ message: 'Writing prompt is empty for this exercise' });
+    }
+
+    const systemInstruction = [
+      'You are an IELTS/CEFR writing coach.',
+      'Return strict JSON only.',
+      'JSON object keys: structureTips (array of exactly 4 short strings), sampleAnswer (string).',
+      'If includeSampleAnswer is false then sampleAnswer must be empty string.',
+      'Keep tips concise and practical.'
+    ].join(' ');
+
+    const userPrompt = [
+      `Task prompt: ${taskPrompt}`,
+      `Student submission (optional): ${String(submissionText || '').trim()}`,
+      `includeSampleAnswer: ${Boolean(includeSampleAnswer)}`,
+      'Generate writing guidance for this exact prompt.'
+    ].join('\n');
+
+    const aiRaw = await generateGeminiText({
+      systemInstruction,
+      userPrompt,
+      temperature: 0.3,
+      maxOutputTokens: 900,
+      forceJsonOutput: true
+    });
+
+    let parsed;
+    try {
+      parsed = JSON.parse(aiRaw);
+    } catch (_err) {
+      return res.status(500).json({ message: 'AI response is not valid JSON' });
+    }
+
+    const structureTips = Array.isArray(parsed?.structureTips)
+      ? parsed.structureTips.map((tip) => String(tip || '').trim()).filter(Boolean).slice(0, 4)
+      : [];
+    const sampleAnswer = String(parsed?.sampleAnswer || '').trim();
+
+    return res.json({
+      structureTips,
+      sampleAnswer
+    });
+  } catch (error) {
     return res.status(500).json({ message: error.message });
   }
 };

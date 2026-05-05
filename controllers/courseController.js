@@ -1,13 +1,12 @@
 import { Exercise } from '../models/index.js';
 
 const buildCourseSummary = (courseId, exercises) => {
-  const firstExercise = exercises[0] || {};
   return {
     id: Number(courseId),
     language_id: null,
     name: `Khóa ${courseId}`,
     description: null,
-    level: firstExercise.cefr_level || null,
+    level: null,
     duration: null,
     is_deleted: false,
     lessons: [],
