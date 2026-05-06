@@ -66,6 +66,13 @@ function ExerciseAttemptPage() {
   const { courseId, skill, exerciseId } = useParams();
   const audioRef = useRef(null);
   const questionRefs = useRef([]);
+  const recognitionRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const streamRef = useRef(null);
+  const transcriptRef = useRef('');
+  const recordingAudioRef = useRef(null);
+  const recordingBlobRef = useRef(null);
 
   const [exercise, setExercise] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -81,10 +88,16 @@ function ExerciseAttemptPage() {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isRecording, setIsRecording] = useState(false);
   const [speechTranscript, setSpeechTranscript] = useState('');
+  const [speakingLoading, setSpeakingLoading] = useState(false);
+  const [speakingResult, setSpeakingResult] = useState(null);
   const [speakingReportOpen, setSpeakingReportOpen] = useState(false);
+  const [speakingIsPlaying, setSpeakingIsPlaying] = useState(false);
+  const [speakingAudioProgress, setSpeakingAudioProgress] = useState(0);
+  const [speakingAudioCurrent, setSpeakingAudioCurrent] = useState(0);
+  const [speakingAudioDuration, setSpeakingAudioDuration] = useState(0);
   const [writingStructureTips, setWritingStructureTips] = useState([]);
   const [writingSampleAnswer, setWritingSampleAnswer] = useState('');
-  const [writingAiLoading, setWritingAiLoading] = useState(false);
+  const [speakingError, setSpeakingError] = useState('');
 
   const goBack = () => {
     navigate(-1);
@@ -290,29 +303,300 @@ function ExerciseAttemptPage() {
 
   const toggleSpeakingRecording = () => {
     if (isRecording) {
-      setIsRecording(false);
-      setSpeechTranscript((prev) => prev.trim() ? prev : `AI transcript thô: ${speakingPrompt}`);
-      return;
+      stopRecording();
+    } else {
+      startRecording();
     }
-
-    setSpeakingReportOpen(false);
-    setSubmitted(false);
-    setSpeechTranscript('');
-    setIsRecording(true);
   };
 
   const handleSpeakingReview = () => {
     if (isRecording) {
-      setIsRecording(false);
-      setSpeechTranscript((prev) => prev.trim() ? prev : `AI transcript thô: ${speakingPrompt}`);
+      stopRecording();
+      return;
     }
 
-    if (!speechTranscript.trim()) {
-      setSpeechTranscript(`AI transcript thô: ${speakingPrompt}`);
+    if (!recordingBlobRef.current) {
+      setSpeakingError('Chưa có bản ghi âm để nộp. Hãy ghi âm trước.');
+      return;
     }
 
-    setSpeakingReportOpen(true);
-    setSubmitted(true);
+    if (!speakingLoading && !speakingResult) {
+      sendToServer(recordingBlobRef.current, speechTranscript.trim(), speakingPrompt);
+    }
+  };
+
+  const startRecording = async () => {
+    setSpeakingReportOpen(false);
+    setSubmitted(false);
+    setSpeechTranscript('');
+    setSpeakingResult(null);
+    setSpeakingLoading(false);
+
+    // Setup SpeechRecognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    // const transcriptRef = useRef('');
+    if (SpeechRecognition) {
+      try {
+        transcriptRef.current = '';
+        const r = new SpeechRecognition();
+        r.lang = navigator.language || 'en-US';
+        r.interimResults = true;
+        r.continuous = true;
+
+        console.log('[Web Speech API] Initialized', { lang: r.lang, interimResults: r.interimResults, continuous: r.continuous });
+
+        r.onstart = () => {
+          console.log('[Web Speech API] onstart - Recognition started, listening for audio...');
+        };
+
+        r.onresult = (e) => {
+          console.log('[Web Speech API] onresult fired', { 
+            resultIndex: e.resultIndex, 
+            resultsLength: e.results.length,
+            isFinal: e.results[e.results.length - 1]?.isFinal 
+          });
+
+          let finalText = '';
+          let interimText = '';
+
+          for (let i = e.resultIndex; i < e.results.length; i++) {
+            const res = e.results[i];
+            const transcript = res[0]?.transcript || '';
+            console.log(`  [Result ${i}] isFinal=${res.isFinal}, transcript="${transcript}"`);
+            
+            if (res.isFinal) {
+              finalText += transcript + ' ';
+            } else {
+              interimText += transcript;
+            }
+          }
+          
+          if (finalText) {
+            transcriptRef.current = finalText.trim();
+            console.log('[Web Speech API] finalText updated in ref', { finalText: transcriptRef.current });
+          }
+          
+          // Show live transcript with interim results
+          const combined = (transcriptRef.current + ' ' + interimText).trim();
+          console.log('[Web Speech API] setSpeechTranscript called', { combined });
+          setSpeechTranscript(combined);
+        };
+
+        r.onend = () => {
+          console.log('[Web Speech API] onend - Recognition ended. Final transcript ref:', transcriptRef.current);
+        };
+
+        r.onerror = (err) => {
+          console.error('[Web Speech API] ERROR:', err.error, err);
+          if (err.error === 'no-speech') {
+            console.warn('[Web Speech API] No speech detected - make sure microphone is working and you are speaking clearly');
+            setSpeakingError('Không phát hiện tiếng nói. Vui lòng kiểm tra microphone và nói rõ ràng hơn.');
+          } else if (err.error === 'network') {
+            console.warn('[Web Speech API] Network error - this is common in private/restricted networks');
+            setSpeakingError('Lỗi mạng: Sứ dụng Web Speech API yêu cầu kết nối internet. Transcript sẽ được tạo từ AI từ file audio.');
+          } else if (err.error === 'permission-denied') {
+            console.error('[Web Speech API] Microphone permission denied - please allow microphone access');
+            setSpeakingError('Bị từ chối truy cập microphone. Vui lòng cho phép truy cập microphone.');
+          } else {
+            console.error('[Web Speech API] Error:', err.error);
+            setSpeakingError(`Lỗi Web Speech API: ${err.error}`);
+          }
+        };
+
+        recognitionRef.current = r;
+        console.log('[Web Speech API] Calling r.start()...');
+        r.start();
+      } catch (err) {
+        console.error('[Web Speech API] start failed', err);
+      }
+    } else {
+      console.error('[Web Speech API] NOT SUPPORTED in this browser! This is the problem.');
+    }
+
+    // Setup MediaRecorder
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      audioChunksRef.current = [];
+      const options = { mimeType: 'audio/webm;codecs=opus' };
+      let mr;
+      try {
+        mr = new MediaRecorder(stream, options);
+      } catch (e) {
+        mr = new MediaRecorder(stream);
+      }
+
+      mr.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) audioChunksRef.current.push(ev.data);
+      };
+
+      mr.onstop = async () => {
+        console.log('[MediaRecorder] onstop callback triggered');
+        console.log('[MediaRecorder] transcriptRef.current at onstop:', transcriptRef.current);
+        
+        setTimeout(async () => {
+            const blob = new Blob(audioChunksRef.current, {
+              type: audioChunksRef.current[0]?.type || 'audio/webm'
+            });
+
+            // IMPORTANT: Only get user's speech, NOT the prompt
+            const userSpeechOnly = transcriptRef.current.trim();
+            console.log('[MediaRecorder] User speech only (no prompt):', { userSpeechOnly });
+
+            // Display only the user's speech transcript
+            setSpeechTranscript(userSpeechOnly);
+            console.log('[MediaRecorder] setSpeechTranscript called with user speech only');
+            
+            // Store blob for later submission (don't auto-submit)
+            recordingBlobRef.current = blob;
+            console.log('[MediaRecorder] Blob stored, size:', blob.size);
+            
+            const blobUrl = URL.createObjectURL(blob);
+            if (recordingAudioRef.current) {
+              recordingAudioRef.current.src = blobUrl;
+              console.log('[MediaRecorder] Audio element src set');
+            }
+
+            try {
+              stream.getTracks().forEach((t) => t.stop());
+            } catch (e) {}
+
+            streamRef.current = null;
+          }, 300);
+      };
+
+      mediaRecorderRef.current = mr;
+      mr.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error('getUserMedia error', err);
+    }
+  };
+
+  const stopRecording = () => {
+    console.log('[Recording] Stopping recording... transcriptRef current:', transcriptRef.current);
+    
+    try {
+      const r = recognitionRef.current;
+      if (r) {
+        console.log('[Recording] Stopping SpeechRecognition');
+        try { r.stop(); } catch (e) {}
+        recognitionRef.current = null;
+      }
+    } catch (e) {}
+
+    const mr = mediaRecorderRef.current;
+    if (mr && mr.state !== 'inactive') {
+      console.log('[Recording] Stopping MediaRecorder');
+      try { mr.stop(); } catch (e) { console.warn(e); }
+      mediaRecorderRef.current = null;
+    }
+
+    setIsRecording(false);
+  };
+
+  useEffect(() => {
+    const audio = recordingAudioRef.current;
+    if (!audio) return undefined;
+
+    const syncState = () => {
+      setSpeakingAudioCurrent(audio.currentTime || 0);
+      setSpeakingAudioProgress(audio.duration ? (audio.currentTime / audio.duration) * 100 : 0);
+    };
+
+    const onLoadedMetadata = () => {
+      setSpeakingAudioDuration(audio.duration || 0);
+    };
+
+    const onEnded = () => setSpeakingIsPlaying(false);
+
+    audio.addEventListener('timeupdate', syncState);
+    audio.addEventListener('loadedmetadata', onLoadedMetadata);
+    audio.addEventListener('ended', onEnded);
+
+    return () => {
+      audio.removeEventListener('timeupdate', syncState);
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+      audio.removeEventListener('ended', onEnded);
+    };
+  }, []);
+
+  const handleRecordingPlayPause = () => {
+    const audio = recordingAudioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      audio.play();
+      setSpeakingIsPlaying(true);
+    } else {
+      audio.pause();
+      setSpeakingIsPlaying(false);
+    }
+  };
+
+  const seekRecordingAudio = (nextTime) => {
+    const audio = recordingAudioRef.current;
+    if (!audio) return;
+    audio.currentTime = Math.max(0, Math.min(nextTime, audio.duration || nextTime));
+    setSpeakingAudioCurrent(audio.currentTime || 0);
+    setSpeakingAudioProgress(audio.duration ? (audio.currentTime / audio.duration) * 100 : 0);
+  };
+
+  const sendToServer = async (audioBlob, frontendTranscript, speakingPromptText) => {
+    setSpeakingLoading(true);
+    setSpeakingError('');
+    setSpeakingResult(null);
+    try {
+      console.log('[sendToServer] Starting submission', {
+        blobSize: audioBlob?.size,
+        transcriptLength: frontendTranscript?.length,
+        speakingPromptLength: speakingPromptText?.length
+      });
+
+      // Store blob for playback
+      recordingBlobRef.current = audioBlob;
+      const blobUrl = URL.createObjectURL(audioBlob);
+      if (recordingAudioRef.current) {
+        recordingAudioRef.current.src = blobUrl;
+      }
+
+      const fd = new FormData();
+      fd.append('audio', audioBlob, 'recording.webm');
+      fd.append('frontend_transcript', frontendTranscript || '');
+      fd.append('speaking_prompt', speakingPromptText || speakingPrompt || '');
+
+      console.log('[sendToServer] Sending to /speech/assess');
+      const res = await api.post('/speech/assess', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const json = res.data || {};
+      
+      console.log('[sendToServer] Response received', {
+        hasPronunciationScore: !!json.pronunciation_score,
+        hasFluencyScore: !!json.fluency_score,
+        transcriptLength: String(json.transcript || '').length,
+        standardTranscriptLength: json.standard_transcript?.length,
+        feedbackLength: json.feedback?.length
+      });
+
+      // prefer server transcript if available
+      const serverTranscript = String(json.transcript || json.standard_transcript || json.standardTranscript || '').trim();
+      if (serverTranscript) {
+        setSpeechTranscript(serverTranscript);
+        console.log('[sendToServer] Server transcript set', { length: serverTranscript.length });
+      }
+      
+      setSpeakingResult(json);
+      setSpeakingReportOpen(true);
+      setSubmitted(true);
+    } catch (err) {
+      console.error('[sendToServer] Error during submission', {
+        message: err?.message,
+        response: err?.response?.data,
+        status: err?.response?.status
+      });
+      setSpeakingError(err?.response?.data?.message || err?.message || 'Lỗi gửi bài. Vui lòng thử lại.');
+      setSpeakingResult(null);
+    } finally {
+      setSpeakingLoading(false);
+    }
   };
 
   return (
@@ -533,6 +817,7 @@ function ExerciseAttemptPage() {
                 <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-[1fr_0.95fr] lg:items-center">
 
                   <div className="space-y-4">
+                    <audio ref={recordingAudioRef} preload="metadata" />
                     <div className="rounded-[24px] border border-border bg-background p-5">
                       {isRecording ? (
                         <div className="flex items-center gap-4">
@@ -560,6 +845,49 @@ function ExerciseAttemptPage() {
                             </div>
                           </div>
                         </div>
+                      ) : recordingBlobRef.current ? (
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-4">
+                            <div className="flex h-18 w-18 items-center justify-center rounded-full bg-primary/10 text-primary">
+                              <Headphones className="h-8 w-8" />
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <p className="text-sm font-semibold text-foreground">Bản ghi của bạn</p>
+                                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                                    Nhấn Play để nghe lại bản ghi của bạn.
+                                  </p>
+                                </div>
+                                <div className="rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                                  Ready
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="space-y-3 rounded-2xl border border-border bg-secondary/40 p-4">
+                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                              <span className="w-11 text-right font-mono">{formatTime(speakingAudioCurrent)}</span>
+                              <div className="relative flex-1">
+                                <div className="h-2 w-full rounded-full bg-secondary cursor-pointer" onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); const pos = (e.clientX - rect.left) / rect.width; seekRecordingAudio(pos * (speakingAudioDuration || 0)); }}>
+                                  <div className="h-2 rounded-full gradient-primary transition-smooth" style={{ width: `${speakingAudioProgress}%` }} />
+                                </div>
+                              </div>
+                              <span className="w-11 font-mono">{formatTime(speakingAudioDuration || 0)}</span>
+                            </div>
+                            <div className="flex items-center justify-center gap-2">
+                              <button onClick={handleRecordingPlayPause} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background transition-smooth hover:border-primary hover:text-primary">
+                                <SkipBack className="h-4 w-4" />
+                              </button>
+                              <button onClick={handleRecordingPlayPause} className="inline-flex h-12 w-12 items-center justify-center rounded-full gradient-primary text-primary-foreground shadow-elegant transition-smooth hover:shadow-glow">
+                                {speakingIsPlaying ? <Pause className="h-5 w-5" /> : <Play className="ml-0.5 h-5 w-5" />}
+                              </button>
+                              <button onClick={() => seekRecordingAudio(speakingAudioCurrent + 5)} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background transition-smooth hover:border-primary hover:text-primary">
+                                <SkipForward className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       ) : (
                         <div className="flex items-center gap-4">
                           <div className="flex h-18 w-18 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -570,21 +898,8 @@ function ExerciseAttemptPage() {
                               <div>
                                 <p className="text-sm font-semibold text-foreground">Audio Player</p>
                                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                                  Bản ghi đã dừng. Bạn có thể nghe lại hoặc chấm bài ngay.
+                                  Bấm Ghi âm để bắt đầu recording.
                                 </p>
-                              </div>
-                              <div className="rounded-full border border-border bg-secondary/50 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                                Ready
-                              </div>
-                            </div>
-                            <div className="mt-4 grid gap-2">
-                              <div className="flex items-center gap-1.5">
-                                {[22, 12, 30, 16, 24, 10, 28, 18, 26, 14, 20, 12].map((height, index) => (
-                                  <span key={index} className="w-2 rounded-full bg-primary/40" style={{ height: `${height}px` }} />
-                                ))}
-                              </div>
-                              <div className="h-2 rounded-full bg-secondary">
-                                <div className="h-2 w-1/3 rounded-full gradient-primary" />
                               </div>
                             </div>
                           </div>
@@ -600,6 +915,27 @@ function ExerciseAttemptPage() {
                         {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                         {isRecording ? 'Dừng ghi âm' : 'Ghi âm'}
                       </button>
+                      {!isRecording && recordingBlobRef.current && !speakingLoading && !submitted && (
+                        <button
+                          onClick={() => handleSpeakingReview()}
+                          className="inline-flex items-center gap-2 rounded-full bg-green-600 px-4 py-2.5 text-sm font-semibold text-white shadow-elegant transition-smooth hover:bg-green-700 hover:shadow-glow"
+                        >
+                          <Sparkles className="h-4 w-4" />
+                          Nộp bài để chấm điểm
+                        </button>
+                      )}
+                      {speakingLoading && (
+                        <button disabled className="inline-flex items-center gap-2 rounded-full bg-blue-500 px-4 py-2.5 text-sm font-semibold text-white shadow-elegant opacity-75 cursor-not-allowed">
+                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                          Đang chấm điểm...
+                        </button>
+                      )}
+                      {submitted && (
+                        <button disabled className="inline-flex items-center gap-2 rounded-full bg-green-600 px-4 py-2.5 text-sm font-semibold text-white shadow-elegant opacity-75 cursor-not-allowed">
+                          <BadgeCheck className="h-4 w-4" />
+                          Đã nộp
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -611,15 +947,37 @@ function ExerciseAttemptPage() {
                   <h3 className="mt-1 text-lg font-bold">Transcript thô từ AI</h3>
                 </div>
                 <div className="p-5 sm:p-6">
-                  {isRecording ? (
-                    <div className="rounded-3xl border border-dashed border-border bg-muted/40 p-6 text-sm leading-7 text-muted-foreground">
-                      Transcript sẽ xuất hiện ngay sau khi bạn dừng ghi âm.
-                    </div>
-                  ) : (
-                    <div className="rounded-3xl border border-border bg-background p-5 text-sm leading-7 text-foreground/85 shadow-card">
-                      {speechTranscript || 'Chưa có transcript. Bấm Ghi âm để bắt đầu.'}
+                  {speakingError && (
+                    <div className="mb-4 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                      <div className="font-semibold">Lỗi gửi bài:</div>
+                      <div className="mt-1">{speakingError}</div>
+                      <button
+                        onClick={() => {
+                          setSpeakingError('');
+                          if (recordingBlobRef.current && speechTranscript.trim()) {
+                            handleSpeakingReview();
+                          }
+                        }}
+                        className="mt-3 text-xs underline hover:no-underline"
+                      >
+                        Thử lại
+                      </button>
                     </div>
                   )}
+                  <div className="rounded-3xl border border-border bg-background p-5 text-sm leading-7 text-foreground/85 shadow-card">
+                    {isRecording ? (
+                      <div>
+                        <div className="text-sm font-semibold text-destructive">Đang ghi âm — Transcript (live)</div>
+                        <div className="mt-3 whitespace-pre-wrap">{speechTranscript || 'Đang lắng nghe...'}</div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="text-sm font-semibold">Transcript thô</div>
+                        <div className="mt-3 whitespace-pre-wrap">{speechTranscript || 'Chưa có transcript. Bấm Ghi âm để bắt đầu.'}</div>
+                        {speakingLoading && <div className="mt-3 text-xs text-muted-foreground">⏳ Đang xử lý AI...</div>}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </article>
             </section>
@@ -666,12 +1024,21 @@ function ExerciseAttemptPage() {
                       Điểm tổng quan
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                      {[
-                        { label: 'Fluency', value: '8.2/10' },
-                        { label: 'Grammar', value: '7.6/10' },
-                        { label: 'Vocabulary', value: '8.0/10' },
-                        { label: 'Pronunciation', value: '7.9/10' },
-                      ].map((item) => (
+                      {(
+                        speakingResult
+                          ? [
+                              { label: 'Fluency', value: (speakingResult.fluency_score ?? speakingResult.fluency ?? null) ? `${speakingResult.fluency_score ?? speakingResult.fluency}/100` : '—' },
+                              { label: 'Grammar', value: speakingResult.grammar_score ? `${speakingResult.grammar_score}/100` : '—' },
+                              { label: 'Vocabulary', value: speakingResult.vocabulary_score ? `${speakingResult.vocabulary_score}/100` : '—' },
+                              { label: 'Pronunciation', value: (speakingResult.pronunciation_score ?? speakingResult.pronunciation ?? null) ? `${speakingResult.pronunciation_score ?? speakingResult.pronunciation}/100` : '—' },
+                            ]
+                          : [
+                              { label: 'Fluency', value: '—' },
+                              { label: 'Grammar', value: '—' },
+                              { label: 'Vocabulary', value: '—' },
+                              { label: 'Pronunciation', value: '—' },
+                            ]
+                      ).map((item) => (
                         <div key={item.label} className="rounded-2xl border border-border bg-background p-3">
                           <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{item.label}</div>
                           <div className="mt-1 text-base font-bold">{item.value}</div>
@@ -686,9 +1053,28 @@ function ExerciseAttemptPage() {
                       Sửa lỗi / Gợi ý
                     </div>
                     <ul className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
-                      <li>• Dùng câu ngắn hơn để tránh ngập ngừng.</li>
-                      <li>• Thêm từ nối như however, therefore, for example.</li>
-                      <li>• Nhấn rõ từ khóa chính trong câu trả lời.</li>
+                      {(() => {
+                        if (speakingLoading) {
+                          return <li>• Đang phân tích bài nói...</li>;
+                        }
+
+                        const feedbackList =
+                          typeof speakingResult?.feedback === 'string'
+                            ? speakingResult.feedback.trim()
+                              ? [speakingResult.feedback]
+                              : []
+                            : Array.isArray(speakingResult?.feedback)
+                            ? speakingResult.feedback
+                            : [];
+
+                        if (feedbackList.length > 0) {
+                          return feedbackList.slice(0, 5).map((f, i) => (
+                            <li key={i}>• {f}</li>
+                          ));
+                        }
+
+                        return <li>• Chưa có nhận xét chi tiết từ hệ thống.</li>;
+                      })()}
                     </ul>
                   </div>
 

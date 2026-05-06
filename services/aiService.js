@@ -1,6 +1,7 @@
 // Option 1 (the way you requested): paste Gemini API key directly here.
 // Example: const HARDCODED_GEMINI_API_KEY = 'AIzaSy...';
 const HARDCODED_GEMINI_API_KEY = '';
+import fs from 'fs';
 
 // Option 2: keep key in .env (recommended for security).
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -822,3 +823,146 @@ function levenshteinDistance(str1, str2) {
 
   return matrix[str2.length][str1.length];
 }
+
+// New: Grade speech for pronunciation, fluency, grammar, vocabulary using VSTEP-style criteria
+export async function gradeSpeechWithAI({
+  audioPath,
+  audioMimeType = 'audio/webm',
+  speakingPrompt = '',
+  standardTranscript = '',
+  frontendTranscript = ''
+}) {
+  if (!audioPath) {
+    throw new Error('Audio is required for grading');
+  }
+
+  const audioBuffer = fs.readFileSync(audioPath);
+  const audioBase64 = audioBuffer.toString('base64');
+  const promptText = String(speakingPrompt || '').trim();
+  const transcriptText = String(standardTranscript || frontendTranscript || '').trim();
+
+  const systemInstruction = `You are a strict VSTEP Speaking examiner. Grade the candidate directly from the audio.
+
+IMPORTANT - TRANSCRIPT RULES:
+- Transcribe ONLY what the candidate SAID, NOT the speaking prompt
+- Do NOT include the prompt text in the transcript field
+- Transcript should contain ONLY the candidate's actual words/speech from the audio
+- If audio is unclear or candidate said very little, still transcribe only what you hear
+
+VSTEP speaking criteria:
+1. Pronunciation and intonation
+2. Fluency and coherence
+3. Lexical resource
+4. Grammar range and accuracy
+5. Task fulfillment and relevance
+
+Return ONLY valid JSON (no markdown, no explanation):
+{
+  "transcript": "best-effort transcript of ONLY what the candidate said (NOT the prompt)",
+  "pronunciation_score": <0-100>,
+  "fluency_score": <0-100>,
+  "grammar_score": <0-100>,
+  "vocabulary_score": <0-100>,
+  "task_fulfillment_score": <0-100>,
+  "feedback": ["bullet1", "bullet2", "bullet3"],
+  "errors": [{"word": "...", "issue": "...", "suggestion": "..."}]
+}`;
+
+  const userPrompt = `VSTEP speaking prompt:
+"${promptText || 'Not provided'}"
+
+Browser transcript (may be empty or imperfect):
+"${transcriptText || 'Not provided'}"
+
+Evaluate the audio response using VSTEP speaking standards. Be fair but strict. Focus on pronunciation, fluency, grammar, vocabulary, task completion, and coherence. Do not rewrite the answer. Provide concise, actionable feedback.`;
+
+  try {
+    const aiText = await generateGeminiText({
+      systemInstruction,
+      userPrompt,
+      userParts: [
+        {
+          inlineData: {
+            mimeType: audioMimeType || 'audio/webm',
+            data: audioBase64
+          }
+        }
+      ],
+      temperature: 0.3,
+      maxOutputTokens: 1024,
+      forceJsonOutput: true
+    });
+
+    console.log('[gradeSpeechWithAI] Gemini response received', {
+      responseLength: aiText.length,
+      preview: aiText.substring(0, 200)
+    });
+
+    // Parse JSON response
+    let gradeResult;
+    try {
+      gradeResult = JSON.parse(aiText);
+    } catch (parseErr) {
+      console.error('[gradeSpeechWithAI] Failed to parse Gemini JSON', {
+        error: parseErr.message,
+        response: aiText.substring(0, 300)
+      });
+      // Fallback: return default scores
+      gradeResult = {
+        transcript: '',
+        pronunciation_score: 70,
+        fluency_score: 70,
+        grammar_score: 70,
+        vocabulary_score: 70,
+        feedback: ['Unable to process audio details. Please try again.'],
+        errors: []
+      };
+    }
+
+    // Validate and sanitize scores
+    const sanitizeScore = (val, defaultVal = 70) => {
+      const num = Number(val);
+      return Number.isFinite(num) && num >= 0 && num <= 100 ? num : defaultVal;
+    };
+
+    return {
+      transcript: String(gradeResult.transcript || gradeResult.standard_transcript || '').trim(),
+      pronunciation_score: sanitizeScore(gradeResult.pronunciation_score),
+      fluency_score: sanitizeScore(gradeResult.fluency_score),
+      grammar_score: sanitizeScore(gradeResult.grammar_score),
+      vocabulary_score: sanitizeScore(gradeResult.vocabulary_score),
+      task_fulfillment_score: sanitizeScore(gradeResult.task_fulfillment_score),
+      feedback: Array.isArray(gradeResult.feedback)
+        ? gradeResult.feedback.slice(0, 5).map(f => String(f || ''))
+        : ['Keep practicing to improve your speaking skills.'],
+      errors: Array.isArray(gradeResult.errors) ? gradeResult.errors.slice(0, 10) : []
+    };
+  } catch (err) {
+    console.error('[gradeSpeechWithAI] Gemini call failed', {
+      error: err.message
+    });
+    throw new Error('Failed to grade speech: ' + err.message);
+  }
+}
+
+// New: Transcribe audio using Gemini (simple fallback to frontend transcript)
+export async function transcribeAudioWithAI(audioPath) {
+  try {
+    // For now, return empty string as fallback
+    // In production, you would integrate with Whisper API or Google Cloud Speech-to-Text
+    // Example with Whisper would require: npm install openai
+    
+    console.log('[transcribeAudioWithAI] Audio transcription not yet integrated', {
+      audioPath
+    });
+
+    // Fallback: return empty, use frontend transcript
+    return '';
+  } catch (err) {
+    console.error('[transcribeAudioWithAI] Transcription failed', {
+      error: err.message
+    });
+    return '';
+  }
+}
+

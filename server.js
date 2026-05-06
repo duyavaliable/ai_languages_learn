@@ -17,6 +17,7 @@ import userRoutes from './routes/users.js';
 import languageRoutes from './routes/languages.js';
 import aiRoutes from './routes/ai.js';
 import exerciseRoutes from './routes/exercises.js';
+import speechRoutes from './routes/speech.js';
 
 
 const app = express();
@@ -55,6 +56,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/languages', languageRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/exercises', exerciseRoutes);
+app.use('/api/speech', speechRoutes);
 
 if (fs.existsSync(clientDistDir)) {
   app.use(express.static(clientDistDir));
