@@ -838,43 +838,67 @@ export async function gradeSpeechWithAI({
 
   const audioBuffer = fs.readFileSync(audioPath);
   const audioBase64 = audioBuffer.toString('base64');
-  const promptText = String(speakingPrompt || '').trim();
-  const transcriptText = String(standardTranscript || frontendTranscript || '').trim();
+  const promptText = String(speakingPrompt || '').trim().slice(0, 800);
+  const transcriptText = String(standardTranscript || frontendTranscript || '').trim().slice(0, 800);
 
-  const systemInstruction = `You are a strict VSTEP Speaking examiner. Grade the candidate directly from the audio.
+  const systemInstruction = [
+    'You are a strict VSTEP Speaking examiner.',
+    'Listen to the audio and grade the candidate response only.',
+    'Do not copy the speaking prompt into the transcript.',
+    'Return valid JSON only with keys: transcript, pronunciation_score, fluency_score, grammar_score, vocabulary_score, task_fulfillment_score, feedback, errors.',
+    'feedback must be a non-empty array of short actionable bullets.',
+    'errors must be an array of up to 10 items with word, issue, suggestion.'
+  ].join(' ');
 
-IMPORTANT - TRANSCRIPT RULES:
-- Transcribe ONLY what the candidate SAID, NOT the speaking prompt
-- Do NOT include the prompt text in the transcript field
-- Transcript should contain ONLY the candidate's actual words/speech from the audio
-- If audio is unclear or candidate said very little, still transcribe only what you hear
+  const userPrompt = [
+    `Speaking prompt: ${promptText || 'Not provided'}`,
+    `Frontend transcript hint: ${transcriptText || 'Not provided'}`,
+    'Score pronunciation, fluency, grammar, vocabulary, and task fulfillment fairly but strictly.',
+    'Keep the transcript limited to the candidate speech you can hear from the audio.'
+  ].join('\n');
 
-VSTEP speaking criteria:
-1. Pronunciation and intonation
-2. Fluency and coherence
-3. Lexical resource
-4. Grammar range and accuracy
-5. Task fulfillment and relevance
+  const parseSpeechGradeResult = (rawText) => {
+    const parsed = parseJsonContent(rawText);
 
-Return ONLY valid JSON (no markdown, no explanation):
-{
-  "transcript": "best-effort transcript of ONLY what the candidate said (NOT the prompt)",
-  "pronunciation_score": <0-100>,
-  "fluency_score": <0-100>,
-  "grammar_score": <0-100>,
-  "vocabulary_score": <0-100>,
-  "task_fulfillment_score": <0-100>,
-  "feedback": ["bullet1", "bullet2", "bullet3"],
-  "errors": [{"word": "...", "issue": "...", "suggestion": "..."}]
-}`;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('AI response must be a JSON object');
+    }
 
-  const userPrompt = `VSTEP speaking prompt:
-"${promptText || 'Not provided'}"
+    const normalizeScore = (value, fieldName) => {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < 0 || num > 100) {
+        throw new Error(`${fieldName} must be a number between 0 and 100`);
+      }
+      return num;
+    };
 
-Browser transcript (may be empty or imperfect):
-"${transcriptText || 'Not provided'}"
+    const feedback = Array.isArray(parsed.feedback)
+      ? parsed.feedback.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 5)
+      : [];
 
-Evaluate the audio response using VSTEP speaking standards. Be fair but strict. Focus on pronunciation, fluency, grammar, vocabulary, task completion, and coherence. Do not rewrite the answer. Provide concise, actionable feedback.`;
+    if (feedback.length === 0) {
+      throw new Error('feedback must be a non-empty array');
+    }
+
+    const errors = Array.isArray(parsed.errors)
+      ? parsed.errors.slice(0, 10).map((item) => ({
+          word: String(item?.word || '').trim(),
+          issue: String(item?.issue || '').trim(),
+          suggestion: String(item?.suggestion || '').trim()
+        }))
+      : [];
+
+    return {
+      transcript: String(parsed.transcript || parsed.standard_transcript || '').trim(),
+      pronunciation_score: normalizeScore(parsed.pronunciation_score, 'pronunciation_score'),
+      fluency_score: normalizeScore(parsed.fluency_score, 'fluency_score'),
+      grammar_score: normalizeScore(parsed.grammar_score, 'grammar_score'),
+      vocabulary_score: normalizeScore(parsed.vocabulary_score, 'vocabulary_score'),
+      task_fulfillment_score: normalizeScore(parsed.task_fulfillment_score, 'task_fulfillment_score'),
+      feedback,
+      errors
+    };
+  };
 
   try {
     const aiText = await generateGeminiText({
@@ -889,7 +913,7 @@ Evaluate the audio response using VSTEP speaking standards. Be fair but strict. 
         }
       ],
       temperature: 0.3,
-      maxOutputTokens: 1024,
+      maxOutputTokens: 768,
       forceJsonOutput: true
     });
 
@@ -898,44 +922,43 @@ Evaluate the audio response using VSTEP speaking standards. Be fair but strict. 
       preview: aiText.substring(0, 200)
     });
 
-    // Parse JSON response
     let gradeResult;
     try {
-      gradeResult = JSON.parse(aiText);
+      gradeResult = parseSpeechGradeResult(aiText);
     } catch (parseErr) {
       console.error('[gradeSpeechWithAI] Failed to parse Gemini JSON', {
         error: parseErr.message,
         response: aiText.substring(0, 300)
       });
-      // Fallback: return default scores
-      gradeResult = {
-        transcript: '',
-        pronunciation_score: 70,
-        fluency_score: 70,
-        grammar_score: 70,
-        vocabulary_score: 70,
-        feedback: ['Unable to process audio details. Please try again.'],
-        errors: []
-      };
+
+      const repairPrompt = [
+        userPrompt,
+        'Previous response was invalid or incomplete JSON.',
+        'Return ONLY valid JSON with all required fields and numeric scores from 0 to 100.',
+        'Do not include markdown or extra text.'
+      ].join('\n');
+      const repairedText = await generateGeminiText({
+        systemInstruction,
+        userPrompt: repairPrompt,
+        userParts: [
+          {
+            inlineData: {
+              mimeType: audioMimeType || 'audio/webm',
+              data: audioBase64
+            }
+          }
+        ],
+        temperature: 0.1,
+        maxOutputTokens: 768,
+        forceJsonOutput: true
+      });
+
+      gradeResult = parseSpeechGradeResult(repairedText);
     }
 
-    // Validate and sanitize scores
-    const sanitizeScore = (val, defaultVal = 70) => {
-      const num = Number(val);
-      return Number.isFinite(num) && num >= 0 && num <= 100 ? num : defaultVal;
-    };
-
     return {
-      transcript: String(gradeResult.transcript || gradeResult.standard_transcript || '').trim(),
-      pronunciation_score: sanitizeScore(gradeResult.pronunciation_score),
-      fluency_score: sanitizeScore(gradeResult.fluency_score),
-      grammar_score: sanitizeScore(gradeResult.grammar_score),
-      vocabulary_score: sanitizeScore(gradeResult.vocabulary_score),
-      task_fulfillment_score: sanitizeScore(gradeResult.task_fulfillment_score),
-      feedback: Array.isArray(gradeResult.feedback)
-        ? gradeResult.feedback.slice(0, 5).map(f => String(f || ''))
-        : ['Keep practicing to improve your speaking skills.'],
-      errors: Array.isArray(gradeResult.errors) ? gradeResult.errors.slice(0, 10) : []
+      ...gradeResult,
+      feedback: gradeResult.feedback.length > 0 ? gradeResult.feedback : ['Keep practicing to improve your speaking skills.']
     };
   } catch (err) {
     console.error('[gradeSpeechWithAI] Gemini call failed', {

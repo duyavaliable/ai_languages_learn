@@ -4,6 +4,7 @@ import sequelize from '../config/database.js';
 const Exercise = sequelize.define('Exercise', {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   course_id: { type: DataTypes.INTEGER, allowNull: false },
+  language_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
   title: { type: DataTypes.STRING(225), allowNull: false },
   skill_type: { type: DataTypes.STRING(32), allowNull: false },
   reading_passage: { type: DataTypes.TEXT('long'), allowNull: true },

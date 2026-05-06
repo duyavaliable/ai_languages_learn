@@ -9,6 +9,13 @@ const SKILL_OPTIONS = [
   { value: 'writing', label: 'Viết' },
   { value: 'speaking', label: 'Nói' }
 ];
+const JAPANESE_SKILL_OPTIONS = [
+  { value: 'vocabulary', label: 'Từ vựng' },
+  { value: 'grammar', label: 'Ngữ pháp' },
+  { value: 'reading', label: 'Đọc' },
+  { value: 'listening', label: 'Nghe' }
+];
+const JAPANESE_PART_OPTIONS = ['N5', 'N4', 'N3', 'N2', 'N1'];
 
 const defaultCourse = {
   language_id: '',
@@ -30,7 +37,8 @@ const defaultExercise = {
   lesson_id: '',
   title: '',
   skill: 'reading',
-  cefrLevel: 'A2'
+  cefrLevel: 'A2',
+  language_id: ''
 };
 
 const defaultVocabulary = {
@@ -154,6 +162,11 @@ function TeacherCreateContent() {
     const prefix = lesson.lesson_order ? `Lesson ${lesson.lesson_order}` : 'Lesson';
     return `${prefix}: ${lesson.title}`;
   };
+
+  const selectedExerciseLanguage = languages.find((lang) => String(lang.id) === String(exerciseForm.language_id));
+  const isJapaneseExercise = String(selectedExerciseLanguage?.code || '').toLowerCase() === 'ja';
+  const exerciseSkillOptions = isJapaneseExercise ? JAPANESE_SKILL_OPTIONS : SKILL_OPTIONS;
+  const exercisePartOptions = isJapaneseExercise ? JAPANESE_PART_OPTIONS : [];
 
   // Helper: Parse questions from raw text (same logic as backend)
   const parseQuestionsFromText = (text) => {
@@ -322,6 +335,7 @@ function TeacherCreateContent() {
         const partsPayload = selectedParts.map((p) => ({ title: p.part.title || '', content: p.part.content || '' }));
         const formData = new FormData();
         formData.append('course_id', String(Number(exerciseForm.course_id)));
+        if (exerciseForm.language_id) formData.append('language_id', String(exerciseForm.language_id));
         formData.append('exerciseTitle', manualTitle);
         formData.append('skill', exerciseForm.skill);
         formData.append('cefrLevel', exerciseForm.cefrLevel);
@@ -404,6 +418,17 @@ function TeacherCreateContent() {
       course_id: courseId,
       title: '',
       cefrLevel: CEFR_LEVELS.includes(level) ? level : prev.cefrLevel
+    }));
+  };
+
+  const handleExerciseLanguageChange = (languageId) => {
+    const selectedLanguage = languages.find((lang) => String(lang.id) === String(languageId));
+    const isJapanese = String(selectedLanguage?.code || '').toLowerCase() === 'ja';
+    setExerciseForm((prev) => ({
+      ...prev,
+      language_id: languageId,
+      skill: isJapanese ? 'vocabulary' : 'reading',
+      cefrLevel: isJapanese ? 'N5' : prev.cefrLevel
     }));
   };
 
@@ -1035,16 +1060,45 @@ function TeacherCreateContent() {
                       ...p,
                       skill: nextSkill
                     }));
-                    if (nextSkill !== 'listening') {
+                      if (!['listening'].includes(nextSkill)) {
                       setListeningAudioFile(null);
                     }
                   }}
                 >
-                  {SKILL_OPTIONS.map((item) => (
+                  {exerciseSkillOptions.map((item) => (
                     <option key={item.value} value={item.value}>{item.label}</option>
                   ))}
                 </select>
               </div>
+
+              <div style={{ marginTop: '12px' }}>
+                <label style={styles.label}>Ngôn ngữ bài</label>
+                <select
+                  style={styles.input}
+                  value={exerciseForm.language_id}
+                  onChange={(e) => handleExerciseLanguageChange(e.target.value)}
+                >
+                  <option value="">-- Chọn ngôn ngữ --</option>
+                  {languages.map((lang) => (
+                    <option key={lang.id} value={lang.id}>{lang.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {isJapaneseExercise && (
+                <div style={{ marginTop: '12px' }}>
+                  <label style={styles.label}>Bậc</label>
+                  <select
+                    style={styles.input}
+                    value={exerciseForm.cefrLevel}
+                    onChange={(e) => setExerciseForm((p) => ({ ...p, cefrLevel: e.target.value }))}
+                  >
+                    {exercisePartOptions.map((part) => (
+                      <option key={part} value={part}>{part}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div style={{ gridColumn: '1 / -1' }}>
                 <label style={styles.label}>Tên bài</label>

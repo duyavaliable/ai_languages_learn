@@ -372,7 +372,7 @@ const extractRelevantParts = (rawText, options = {}) => {
 export async function extractQuestionsFromPart(text, options = {}) {
   if (!text) return [];
 
-  const { skill = 'listening', useAiForAnswers = false } = options;
+  const { skill = 'listening', useAiForAnswers = false, language = 'en' } = options;
   const passageContext = extractPassageTextFromPart(text);
   const lines = String(text).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const questions = [];
@@ -437,7 +437,7 @@ export async function extractQuestionsFromPart(text, options = {}) {
       // For reading skill, if still no answer, use AI
       if (skill === 'reading' && !correctAnswer && useAiForAnswers && currentOptions.length > 0) {
         try {
-          correctAnswer = await findCorrectAnswerWithAi(questionText, currentOptions, passageContext);
+          correctAnswer = await findCorrectAnswerWithAi(questionText, currentOptions, passageContext, language);
         } catch (aiError) {
           console.error(`[AI Answer] Failed for question "${questionText.substring(0, 50)}...":`, aiError.message);
         }
@@ -472,10 +472,13 @@ const parseAnswerKey = (text) => {
 };
 
 // New helper to use AI for finding the correct answer
-const findCorrectAnswerWithAi = async (question, options, passageContext = '') => {
-  const systemInstruction = `You are an expert in English language and reading comprehension. Your task is to identify the single best answer for a multiple-choice question based on the provided context. The user will provide a question and a list of options. You must choose one of the provided options. Respond with only the exact text of the correct option, and nothing else. Do not add any explanation or introductory text.`;
+const findCorrectAnswerWithAi = async (question, options, passageContext = '', language = 'en') => {
+  const isJapanese = String(language || '').toLowerCase().startsWith('ja');
+  const systemInstruction = isJapanese
+    ? 'You are an expert in Japanese reading comprehension. Your task is to identify the single best answer for a multiple-choice question based on the provided context. The user will provide a question and a list of options. You must choose one of the provided options. Respond with only the exact text of the correct option, and nothing else. Do not add any explanation or introductory text.'
+    : 'You are an expert in English language and reading comprehension. Your task is to identify the single best answer for a multiple-choice question based on the provided context. The user will provide a question and a list of options. You must choose one of the provided options. Respond with only the exact text of the correct option, and nothing else. Do not add any explanation or introductory text.';
   
-  const userPrompt = `Reading passage/context:
+  const userPrompt = `${isJapanese ? 'Japanese' : 'Reading'} passage/context:
 "${String(passageContext || '').trim()}"
 
 Question: "${question}"

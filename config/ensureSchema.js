@@ -45,6 +45,7 @@ export const ensureDatabaseSchema = async () => {
     await queryInterface.createTable('exercises', {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       course_id: { type: DataTypes.INTEGER, allowNull: false },
+      language_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: true },
       title: { type: DataTypes.STRING(225), allowNull: false },
       skill_type: { type: DataTypes.STRING(32), allowNull: false },
       reading_passage: { type: DataTypes.TEXT('long'), allowNull: true },
@@ -56,6 +57,11 @@ export const ensureDatabaseSchema = async () => {
       is_deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }
     });
   } else {
+    await ensureColumn('exercises', 'language_id', {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: true
+    });
+
     await ensureColumn('exercises', 'task_prompt', {
       type: DataTypes.TEXT('long'),
       allowNull: true

@@ -21,14 +21,24 @@ const skillMeta = {
   reading: { label: 'Reading', icon: BookOpen, image: 'public/images/reading-illustration.png', badge: 'bg-primary/10 text-primary' },
   listening: { label: 'Listening', icon: Headphones, image: 'public/images/listening-illustration.png', badge: 'bg-accent/10 text-accent' },
   writing: { label: 'Writing', icon: PenTool, image: 'public/images/writing-illustration.png', badge: 'bg-warning/10 text-warning' },
-  speaking: { label: 'Speaking', icon: Mic2, image: 'public/images/speaking-illustration.png', badge: 'bg-success/10 text-success' }
+  speaking: { label: 'Speaking', icon: Mic2, image: 'public/images/speaking-illustration.png', badge: 'bg-success/10 text-success' },
+  vocabulary: { label: 'Vocabulary', icon: BookOpen, image: 'public/images/reading-illustration.png', badge: 'bg-primary/10 text-primary' },
+  grammar: { label: 'Grammar', icon: LibraryBig, image: 'public/images/reading-illustration.png', badge: 'bg-accent/10 text-accent' }
 };
 
-const partCountBySkill = { reading: 4, listening: 3, speaking: 2, writing: 2 };
+const partCountBySkill = { reading: 4, listening: 3, speaking: 2, writing: 2, vocabulary: 5, grammar: 5 };
+const japanesePartOptions = [
+  { value: 1, label: 'N5' },
+  { value: 2, label: 'N4' },
+  { value: 3, label: 'N3' },
+  { value: 4, label: 'N2' },
+  { value: 5, label: 'N1' }
+];
 
 const getExercisePart = (exercise) => {
   const base = Number(exercise?.id) || 1;
-  const partCount = partCountBySkill[exercise?.skill_type] || 3;
+  const isJapanese = String(exercise?.language || exercise?.lang || exercise?.language_code || '').toLowerCase() === 'ja';
+  const partCount = isJapanese ? 5 : (partCountBySkill[exercise?.skill_type] || 3);
   const mod = base % partCount;
   return mod === 0 ? partCount : mod;
 };
@@ -42,6 +52,7 @@ function HomePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSkill, setSelectedSkill] = useState('');
   const [selectedParts, setSelectedParts] = useState([]);
+  const [selectedLanguage, setSelectedLanguage] = useState('all');
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
   useEffect(() => {
@@ -58,24 +69,49 @@ function HomePage() {
   }, []);
 
   const partOptions = useMemo(() => {
+    if (selectedLanguage === 'japanese') return japanesePartOptions;
     const fallbackCount = Math.max(...Object.values(partCountBySkill));
     const partCount = selectedSkill ? (partCountBySkill[selectedSkill] || 0) : fallbackCount;
-    return Array.from({ length: partCount }, (_, index) => index + 1);
-  }, [selectedSkill]);
+    return Array.from({ length: partCount }, (_, index) => ({ value: index + 1, label: `Part ${index + 1}` }));
+  }, [selectedSkill, selectedLanguage]);
+
+  const getPartLabel = (part) => {
+    if (selectedLanguage === 'japanese') {
+      return japanesePartOptions.find((item) => item.value === Number(part))?.label || `N${part}`;
+    }
+    return `Part ${part}`;
+  };
 
   useEffect(() => {
+    if (selectedLanguage === 'japanese') {
+      setSelectedSkill((prev) => (['reading', 'listening', 'vocabulary', 'grammar'].includes(prev) ? prev : ''));
+    } else if (selectedLanguage === 'english') {
+      setSelectedSkill((prev) => (['reading', 'listening', 'writing', 'speaking'].includes(prev) ? prev : ''));
+    }
+
     if (!selectedSkill) {
       setSelectedParts([]);
       return;
     }
 
-    const partCount = partCountBySkill[selectedSkill] || 0;
+    const partCount = selectedLanguage === 'japanese' ? 5 : (partCountBySkill[selectedSkill] || 0);
     setSelectedParts((prev) => prev.filter((part) => part <= partCount));
-  }, [selectedSkill]);
+  }, [selectedSkill, selectedLanguage]);
 
   const filteredExercises = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     let items = exercises.slice();
+
+    // Language filtering: 'all' shows both English and Japanese
+    if (selectedLanguage && selectedLanguage !== 'all') {
+      const want = String(selectedLanguage || '').toLowerCase();
+      items = items.filter((exercise) => {
+        const lang = String(exercise.language || exercise.lang || exercise.language_code || '').toLowerCase();
+        if (!lang) return false;
+        // support values like 'english'/'en' and 'japanese'/'ja'
+        return lang.startsWith(want.charAt(0)) || lang.includes(want);
+      });
+    }
 
     if (selectedSkill) {
       items = items.filter((exercise) => exercise.skill_type === selectedSkill);
@@ -87,10 +123,10 @@ function HomePage() {
 
     if (!query) return items;
 
-        return items.filter((exercise) => [exercise.title, exercise.skill_type]
+    return items.filter((exercise) => [exercise.title, exercise.skill_type]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(query)));
-  }, [exercises, searchQuery, selectedParts, selectedSkill]);
+  }, [exercises, searchQuery, selectedParts, selectedSkill, selectedLanguage]);
 
   const handleSelectSkill = (skill) => {
     setSelectedSkill(selectedSkill === skill ? '' : skill);
@@ -98,6 +134,12 @@ function HomePage() {
 
   const handleTogglePart = (part) => {
     setSelectedParts((prev) => (prev.includes(part) ? prev.filter((item) => item !== part) : [...prev, part]));
+  };
+
+  const handleExerciseLanguageNav = (language) => {
+    setSelectedLanguage(language);
+    setSelectedSkill('');
+    setSelectedParts([]);
   };
 
   const handleOpenExercise = (exercise) => {
@@ -131,21 +173,21 @@ function HomePage() {
           <div className="hidden md:flex items-center justify-center">
             <nav className="inline-flex items-center gap-3 rounded-full bg-background/60 p-1">
               <button
-                onClick={() => { setHeaderNav('dashboard'); navigate('/'); }}
+                onClick={() => { setHeaderNav('dashboard'); handleExerciseLanguageNav('all'); navigate('/'); }}
                 className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${headerNav === 'dashboard' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
               >
                 <LibraryBig className="h-4 w-4" />
                 Dashboard
               </button>
               <button
-                onClick={() => { setHeaderNav('english'); navigate('/courses'); }}
+                onClick={() => { setHeaderNav('english'); handleExerciseLanguageNav('english'); /* stay on dashboard and filter */ }}
                 className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${headerNav === 'english' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
               >
                 <BookOpen className="h-4 w-4" />
                 English
               </button>
               <button
-                onClick={() => { setHeaderNav('japanese'); navigate('/courses?lang=ja'); }}
+                onClick={() => { setHeaderNav('japanese'); handleExerciseLanguageNav('japanese'); /* stay on dashboard and filter */ }}
                 className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${headerNav === 'japanese' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
               >
                 <BookOpen className="h-4 w-4" />
@@ -215,11 +257,11 @@ function HomePage() {
                 <div className="flex flex-wrap gap-2">
                   {partOptions.map((part) => (
                     <button
-                      key={part}
-                      onClick={() => handleTogglePart(part)}
-                      className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium transition-smooth ${selectedParts.includes(part) ? 'gradient-primary text-primary-foreground shadow-elegant' : 'border border-border bg-card text-muted-foreground hover:border-primary hover:text-primary'}`}
+                      key={part.value}
+                      onClick={() => handleTogglePart(part.value)}
+                      className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium transition-smooth ${selectedParts.includes(part.value) ? 'gradient-primary text-primary-foreground shadow-elegant' : 'border border-border bg-card text-muted-foreground hover:border-primary hover:text-primary'}`}
                     >
-                      {part}
+                      {part.label}
                     </button>
                   ))}
                 </div>
@@ -273,7 +315,7 @@ function HomePage() {
                         <img src={meta.image} alt={exercise.title} className="h-full w-full object-cover transition-smooth group-hover:scale-105" loading="lazy" />
                         <div className="absolute inset-0 bg-gradient-to-t from-foreground/60 to-transparent" />
                         <div className="absolute bottom-3 left-3 right-3 flex items-center justify-end text-xs">
-                          <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary-foreground backdrop-blur-sm">Part {part}</span>
+                          <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary-foreground backdrop-blur-sm">{getPartLabel(part)}</span>
                         </div>
                       </div>
                       <div className="p-5">

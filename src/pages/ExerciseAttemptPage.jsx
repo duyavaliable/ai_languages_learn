@@ -144,9 +144,14 @@ function ExerciseAttemptPage() {
   const readingPassage = String(exercise?.reading_passage || '').trim();
   const readingPassageDisplay = useMemo(() => extractIntroText(readingPassage), [readingPassage]);
   const taskPrompt = String(exercise?.task_prompt || exercise?.taskPrompt || writingPromptFromQuestions || exercise?.prompt || exercise?.reading_passage || '').trim();
+  const speakingSampleAnswer = useMemo(
+    () => String(speakingResult?.sample_answer || speakingResult?.sampleAnswer || exercise?.sample_answer || exercise?.sampleAnswer || '').trim(),
+    [speakingResult, exercise]
+  );
   const audioUrl = String(exercise?.audio_url || '').trim();
   const displayTitle = exercise?.title || 'Bài tập';
-  const isReading = exercise?.skill_type === 'reading';
+  const isReadingLike = ['reading', 'vocabulary', 'grammar'].includes(String(exercise?.skill_type || '').toLowerCase());
+  const isReading = isReadingLike;
   const isListening = exercise?.skill_type === 'listening';
   const isWriting = exercise?.skill_type === 'writing';
   const isSpeaking = exercise?.skill_type === 'speaking';
@@ -331,87 +336,12 @@ function ExerciseAttemptPage() {
     setSpeechTranscript('');
     setSpeakingResult(null);
     setSpeakingLoading(false);
-
-    // Setup SpeechRecognition
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    // const transcriptRef = useRef('');
-    if (SpeechRecognition) {
-      try {
-        transcriptRef.current = '';
-        const r = new SpeechRecognition();
-        r.lang = navigator.language || 'en-US';
-        r.interimResults = true;
-        r.continuous = true;
-
-        console.log('[Web Speech API] Initialized', { lang: r.lang, interimResults: r.interimResults, continuous: r.continuous });
-
-        r.onstart = () => {
-          console.log('[Web Speech API] onstart - Recognition started, listening for audio...');
-        };
-
-        r.onresult = (e) => {
-          console.log('[Web Speech API] onresult fired', { 
-            resultIndex: e.resultIndex, 
-            resultsLength: e.results.length,
-            isFinal: e.results[e.results.length - 1]?.isFinal 
-          });
-
-          let finalText = '';
-          let interimText = '';
-
-          for (let i = e.resultIndex; i < e.results.length; i++) {
-            const res = e.results[i];
-            const transcript = res[0]?.transcript || '';
-            console.log(`  [Result ${i}] isFinal=${res.isFinal}, transcript="${transcript}"`);
-            
-            if (res.isFinal) {
-              finalText += transcript + ' ';
-            } else {
-              interimText += transcript;
-            }
-          }
-          
-          if (finalText) {
-            transcriptRef.current = finalText.trim();
-            console.log('[Web Speech API] finalText updated in ref', { finalText: transcriptRef.current });
-          }
-          
-          // Show live transcript with interim results
-          const combined = (transcriptRef.current + ' ' + interimText).trim();
-          console.log('[Web Speech API] setSpeechTranscript called', { combined });
-          setSpeechTranscript(combined);
-        };
-
-        r.onend = () => {
-          console.log('[Web Speech API] onend - Recognition ended. Final transcript ref:', transcriptRef.current);
-        };
-
-        r.onerror = (err) => {
-          console.error('[Web Speech API] ERROR:', err.error, err);
-          if (err.error === 'no-speech') {
-            console.warn('[Web Speech API] No speech detected - make sure microphone is working and you are speaking clearly');
-            setSpeakingError('Không phát hiện tiếng nói. Vui lòng kiểm tra microphone và nói rõ ràng hơn.');
-          } else if (err.error === 'network') {
-            console.warn('[Web Speech API] Network error - this is common in private/restricted networks');
-            setSpeakingError('Lỗi mạng: Sứ dụng Web Speech API yêu cầu kết nối internet. Transcript sẽ được tạo từ AI từ file audio.');
-          } else if (err.error === 'permission-denied') {
-            console.error('[Web Speech API] Microphone permission denied - please allow microphone access');
-            setSpeakingError('Bị từ chối truy cập microphone. Vui lòng cho phép truy cập microphone.');
-          } else {
-            console.error('[Web Speech API] Error:', err.error);
-            setSpeakingError(`Lỗi Web Speech API: ${err.error}`);
-          }
-        };
-
-        recognitionRef.current = r;
-        console.log('[Web Speech API] Calling r.start()...');
-        r.start();
-      } catch (err) {
-        console.error('[Web Speech API] start failed', err);
-      }
-    } else {
-      console.error('[Web Speech API] NOT SUPPORTED in this browser! This is the problem.');
-    }
+    setSpeakingError('');
+    recordingBlobRef.current = null;
+    transcriptRef.current = '';
+    setSpeakingAudioCurrent(0);
+    setSpeakingAudioProgress(0);
+    setSpeakingAudioDuration(0);
 
     // Setup MediaRecorder
     try {
@@ -432,21 +362,12 @@ function ExerciseAttemptPage() {
 
       mr.onstop = async () => {
         console.log('[MediaRecorder] onstop callback triggered');
-        console.log('[MediaRecorder] transcriptRef.current at onstop:', transcriptRef.current);
         
         setTimeout(async () => {
             const blob = new Blob(audioChunksRef.current, {
               type: audioChunksRef.current[0]?.type || 'audio/webm'
             });
 
-            // IMPORTANT: Only get user's speech, NOT the prompt
-            const userSpeechOnly = transcriptRef.current.trim();
-            console.log('[MediaRecorder] User speech only (no prompt):', { userSpeechOnly });
-
-            // Display only the user's speech transcript
-            setSpeechTranscript(userSpeechOnly);
-            console.log('[MediaRecorder] setSpeechTranscript called with user speech only');
-            
             // Store blob for later submission (don't auto-submit)
             recordingBlobRef.current = blob;
             console.log('[MediaRecorder] Blob stored, size:', blob.size);
@@ -470,21 +391,11 @@ function ExerciseAttemptPage() {
       setIsRecording(true);
     } catch (err) {
       console.error('getUserMedia error', err);
+      setSpeakingError('Không thể truy cập microphone. Vui lòng cho phép quyền micro và thử lại.');
     }
   };
 
   const stopRecording = () => {
-    console.log('[Recording] Stopping recording... transcriptRef current:', transcriptRef.current);
-    
-    try {
-      const r = recognitionRef.current;
-      if (r) {
-        console.log('[Recording] Stopping SpeechRecognition');
-        try { r.stop(); } catch (e) {}
-        recognitionRef.current = null;
-      }
-    } catch (e) {}
-
     const mr = mediaRecorderRef.current;
     if (mr && mr.state !== 'inactive') {
       console.log('[Recording] Stopping MediaRecorder');
@@ -565,7 +476,10 @@ function ExerciseAttemptPage() {
       fd.append('speaking_prompt', speakingPromptText || speakingPrompt || '');
 
       console.log('[sendToServer] Sending to /speech/assess');
-      const res = await api.post('/speech/assess', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const res = await api.post('/speech/assess', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000
+      });
       const json = res.data || {};
       
       console.log('[sendToServer] Response received', {
@@ -592,7 +506,11 @@ function ExerciseAttemptPage() {
         response: err?.response?.data,
         status: err?.response?.status
       });
-      setSpeakingError(err?.response?.data?.message || err?.message || 'Lỗi gửi bài. Vui lòng thử lại.');
+      setSpeakingError(
+        err?.code === 'ECONNABORTED'
+          ? 'Hệ thống chấm speaking đang xử lý lâu hơn bình thường. Vui lòng thử lại sau ít phút.'
+          : err?.response?.data?.message || err?.message || 'Lỗi gửi bài. Vui lòng thử lại.'
+      );
       setSpeakingResult(null);
     } finally {
       setSpeakingLoading(false);
@@ -973,7 +891,9 @@ function ExerciseAttemptPage() {
                     ) : (
                       <div>
                         <div className="text-sm font-semibold">Transcript thô</div>
-                        <div className="mt-3 whitespace-pre-wrap">{speechTranscript || 'Chưa có transcript. Bấm Ghi âm để bắt đầu.'}</div>
+                        <div className="mt-3 whitespace-pre-wrap">
+                          {speechTranscript || (isRecording ? 'Đang ghi âm. Transcript sẽ được AI tạo sau khi nộp bài.' : 'Chưa có transcript. Bấm Ghi âm để bắt đầu.')}
+                        </div>
                         {speakingLoading && <div className="mt-3 text-xs text-muted-foreground">⏳ Đang xử lý AI...</div>}
                       </div>
                     )}
@@ -1089,6 +1009,16 @@ function ExerciseAttemptPage() {
                           {word}
                         </span>
                       ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-[24px] border border-border bg-background p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                      Mẫu trả lời / đáp án
+                    </div>
+                    <div className="mt-3 whitespace-pre-wrap text-sm leading-7 text-muted-foreground">
+                      {speakingSampleAnswer || 'Chưa có mẫu trả lời cho bài nói này.'}
                     </div>
                   </div>
                 </div>

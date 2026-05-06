@@ -1,11 +1,11 @@
-import { Exercise, Lesson } from '../models/index.js';
+import { Exercise, Lesson, Language } from '../models/index.js';
 import { parseExerciseParts, extractQuestionsFromPart, extractPassageTextFromPart } from '../services/exerciseImportService.js';
 import { generateGeminiText } from '../services/aiService.js';
 
 const normalizeSkillType = (skill) => {
   if (!skill) return null;
   const value = String(skill).trim().toLowerCase();
-  const supported = ['listening', 'speaking', 'reading', 'writing'];
+  const supported = ['listening', 'speaking', 'reading', 'writing', 'vocabulary', 'grammar'];
   return supported.includes(value) ? value : null;
 };
 
@@ -24,7 +24,7 @@ const extractPromptFromQuestionsJson = (questionsJson) => {
 
 export const getExercises = async (req, res) => {
   try {
-    const { courseId, skill, includeDeleted } = req.query;
+    const { courseId, skill, includeDeleted, lang } = req.query;
     const role = String(req.user?.role || '').toLowerCase();
     const where = {};
 
@@ -38,17 +38,38 @@ export const getExercises = async (req, res) => {
     if (skill) {
       const normalizedSkill = normalizeSkillType(skill);
       if (!normalizedSkill) {
-        return res.status(400).json({ message: 'skill must be listening, speaking, reading or writing' });
+        return res.status(400).json({ message: 'skill must be listening, speaking, reading, writing, vocabulary or grammar' });
       }
       where.skill_type = normalizedSkill;
     }
 
+    // language filter: accept 'en'|'ja' or 'english'|'japanese'
+    if (lang) {
+      const code = String(lang || '').trim().toLowerCase();
+      const map = { english: 'en', en: 'en', japanese: 'ja', ja: 'ja' };
+      const want = map[code] || code;
+      if (!want) {
+        return res.status(400).json({ message: 'invalid lang value' });
+      }
+      const languageRow = await Language.findOne({ where: { code: want } });
+      if (!languageRow) return res.status(400).json({ message: 'language not found' });
+      where.language_id = Number(languageRow.id);
+    }
+
     const exercises = await Exercise.findAll({
       where,
+      include: [{ model: Language, as: 'language', attributes: ['id', 'name', 'code'] }],
       order: [['id', 'DESC']]
     });
 
-    return res.json(exercises);
+    // normalize payload to include `language` as code for frontend convenience
+    const rows = exercises.map((e) => {
+      const obj = e.toJSON ? e.toJSON() : e;
+      obj.language = obj.language?.code || null;
+      return obj;
+    });
+
+    return res.json(rows);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -57,7 +78,8 @@ export const getExercises = async (req, res) => {
 export const getExerciseById = async (req, res) => {
   try {
     const exercise = await Exercise.findOne({
-      where: { id: req.params.id, is_deleted: false }
+      where: { id: req.params.id, is_deleted: false },
+      include: [{ model: Language, as: 'language', attributes: ['id', 'name', 'code'] }]
     });
 
     if (!exercise) {
@@ -74,7 +96,9 @@ export const getExerciseById = async (req, res) => {
       });
     }
 
-    return res.json(exercise);
+    const payload = exercise.toJSON ? exercise.toJSON() : exercise;
+    payload.language = payload.language?.code || null;
+    return res.json(payload);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -194,6 +218,27 @@ export const previewExerciseFile = async (req, res) => {
 export const createExercisesFromParts = async (req, res) => {
   try {
     const { course_id, exerciseTitle, skill } = req.body;
+    // Resolve language from request: accept numeric language_id or code (en/ja/english/japanese)
+    let resolvedLanguageId = null;
+    let resolvedLanguageCode = 'en';
+    const rawLangId = req.body.language_id || req.body.language || req.body.lang || req.query.lang || '';
+    if (rawLangId) {
+      const asNum = Number(rawLangId);
+      if (Number.isFinite(asNum) && asNum > 0) {
+        resolvedLanguageId = asNum;
+        const languageRow = await Language.findOne({ where: { id: resolvedLanguageId } });
+        resolvedLanguageCode = String(languageRow?.code || 'en').toLowerCase();
+      } else {
+        const code = String(rawLangId || '').trim().toLowerCase();
+        const codeMap = { english: 'en', en: 'en', japanese: 'ja', ja: 'ja' };
+        const want = codeMap[code] || code;
+        const languageRow = await Language.findOne({ where: { code: want } });
+        if (languageRow) {
+          resolvedLanguageId = Number(languageRow.id);
+          resolvedLanguageCode = String(languageRow.code || 'en').toLowerCase();
+        }
+      }
+    }
     let parts = [];
     try {
       parts = req.body.parts ? (typeof req.body.parts === 'string' ? JSON.parse(req.body.parts) : req.body.parts) : [];
@@ -255,7 +300,8 @@ export const createExercisesFromParts = async (req, res) => {
       // Parse questions, using AI for reading answers if needed
       const questions = await extractQuestionsFromPart(fullPartText, {
         skill: normalizedSkill,
-        useAiForAnswers: normalizedSkill === 'reading'
+        useAiForAnswers: normalizedSkill === 'reading',
+        language: resolvedLanguageCode
       });
 
       // Writing prompt must be persisted in questions_json as requested.
@@ -267,6 +313,7 @@ export const createExercisesFromParts = async (req, res) => {
 
       const row = await Exercise.create({
         course_id: resolvedCourseId,
+        language_id: resolvedLanguageId,
         title: name,
         skill_type: normalizedSkill,
         reading_passage,

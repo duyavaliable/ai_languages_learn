@@ -10,6 +10,10 @@ import UserProgress from './UserProgress.js';
 Lesson.belongsTo(Language, { foreignKey: 'language_id', as: 'language' });
 Language.hasMany(Lesson, { foreignKey: 'language_id', as: 'lessons' });
 
+// Exercise - Language
+Exercise.belongsTo(Language, { foreignKey: 'language_id', as: 'language' });
+Language.hasMany(Exercise, { foreignKey: 'language_id', as: 'exercises' });
+
 // Exercise keeps course_id as a legacy grouping key.
 
 // Vocabulary - Lesson
