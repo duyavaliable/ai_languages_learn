@@ -3,6 +3,7 @@ import { Link } from "react-router-dom"
 import { BookOpen, Headphones, PenTool, Clock, Users, ChevronRight } from "lucide-react"
 import type { Exercise } from "../types"
 import { cn } from "../lib/utils"
+import { assetUrl } from "../lib/asset"
 
 const typeConfig = {
   reading: { icon: BookOpen, color: "bg-primary/10 text-primary" },
@@ -17,9 +18,9 @@ const difficultyConfig = {
 } as const
 
 const defaultImageByType = {
-  reading: "public/images/reading-illustration.png",
-  listening: "public/images/listening-illustration.png",
-  writing: "public/images/writing-illustration.png",
+  reading: assetUrl("images/reading-illustration.png"),
+  listening: assetUrl("images/listening-illustration.png"),
+  writing: assetUrl("images/writing-illustration.png"),
 } as const
 
 export function ExerciseCard({ exercise }: { exercise: Exercise }) {

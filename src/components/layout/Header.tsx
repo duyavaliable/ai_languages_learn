@@ -1,11 +1,9 @@
 import { Link, useLocation } from "react-router-dom"
-import { BookOpen, Headphones, PenTool, LayoutDashboard, User, Settings, Bell, Sparkles, Images } from "lucide-react"
+import { BookOpen, Headphones, PenTool, User, Settings, Bell, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 const navLinks = [
-  { label: "Dashboard", path: "/", icon: LayoutDashboard },
-  { label: "Asset test", path: "/#asset-test", icon: Images },
   { label: "English", path: "/?lang=english", icon: BookOpen },
   { label: "Japanese", path: "/?lang=japanese", icon: BookOpen },
 ]
@@ -30,7 +28,7 @@ export function Header() {
         <nav className="hidden md:flex items-center gap-1">
           {navLinks.map((link) => {
             const isActive = location.pathname + location.search === link.path ||
-              (link.path === "/" && location.pathname === "/" && !location.search)
+              (link.path === "/?lang=english" && location.pathname === "/" && !location.search)
             return (
               <Link
                 key={link.label}
@@ -88,7 +86,7 @@ export function Sidebar({
   ]
 
   const parts = [1, 2, 3]
-  const languages = ["all", "english", "japanese"]
+  const languages = ["english", "japanese"]
 
   return (
     <aside className="w-64 shrink-0 border-r border-border bg-card p-5">

@@ -1,9 +1,4 @@
-// Option 1 (the way you requested): paste Gemini API key directly here.
-// Example: const HARDCODED_GEMINI_API_KEY = 'AIzaSy...';
-const HARDCODED_GEMINI_API_KEY = '';
 import fs from 'fs';
-
-// Option 2: keep key in .env (recommended for security).
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL_TEXT = 'gemini-2.5-flash-lite';
 
@@ -163,12 +158,12 @@ export const generateExplanation = async (concept, language) => {
   }
 };
 
-export const generateExercises = async (topic, difficulty, count = 5) => {
+export const generateExercises = async (difficulty, count = 5) => {
   try {
     const safeCount = Number.isFinite(Number(count)) ? Math.min(Math.max(Number(count), 1), 20) : 5;
     const aiText = await generateGeminiText({
       systemInstruction: 'You are an English exercise generator. Return strict JSON only.',
-      userPrompt: `Generate ${safeCount} ${difficulty} level English exercises about "${topic || 'general English'}". Return JSON array only. Each item must have: question, options (array, can be empty for speaking/writing), correctAnswer, explanation.`,
+      userPrompt: `Generate ${safeCount} ${difficulty} level English exercises. Return JSON array only. Each item must have: question, options (array, can be empty for speaking/writing), correctAnswer, explanation.`,
       temperature: 0.6,
       maxOutputTokens: 1400
     });

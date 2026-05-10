@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, replace } from 'react-router-dom';
 import api from '../services/api';
 
 function LoginPage() {
@@ -25,7 +25,7 @@ function LoginPage() {
         email: res.data.email,
         role: res.data.role
       }));
-      navigate('/');
+      navigate('/?lang=english', { replace: true });
     } catch (err) {
       setError(err.response?.data?.message || 'Đăng nhập thất bại');
     } finally {

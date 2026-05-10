@@ -16,14 +16,20 @@ import {
   Mic2
 } from 'lucide-react';
 import api from '../services/api';
+import { assetUrl } from '../lib/asset';
 
 const skillMeta = {
-  reading: { label: 'Reading', icon: BookOpen, image: 'public/images/reading-illustration.png', badge: 'bg-primary/10 text-primary' },
-  listening: { label: 'Listening', icon: Headphones, image: 'public/images/listening-illustration.png', badge: 'bg-accent/10 text-accent' },
-  writing: { label: 'Writing', icon: PenTool, image: 'public/images/writing-illustration.png', badge: 'bg-warning/10 text-warning' },
-  speaking: { label: 'Speaking', icon: Mic2, image: 'public/images/speaking-illustration.png', badge: 'bg-success/10 text-success' },
-  vocabulary: { label: 'Vocabulary', icon: BookOpen, image: 'public/images/reading-illustration.png', badge: 'bg-primary/10 text-primary' },
-  grammar: { label: 'Grammar', icon: LibraryBig, image: 'public/images/reading-illustration.png', badge: 'bg-accent/10 text-accent' }
+  reading: { label: 'Reading', icon: BookOpen, image: assetUrl('images/reading-illustration.png'), badge: 'bg-primary/10 text-primary' },
+  listening: { label: 'Listening', icon: Headphones, image: assetUrl('images/listening-illustration.png'), badge: 'bg-accent/10 text-accent' },
+  writing: { label: 'Writing', icon: PenTool, image: assetUrl('images/writing-illustration.png'), badge: 'bg-warning/10 text-warning' },
+  speaking: { label: 'Speaking', icon: Mic2, image: assetUrl('images/speaking-illustration.png'), badge: 'bg-success/10 text-success' },
+  vocabulary: { label: 'Vocabulary', icon: BookOpen, image: assetUrl('images/reading-illustration.png'), badge: 'bg-primary/10 text-primary' },
+  grammar: { label: 'Grammar', icon: LibraryBig, image: assetUrl('images/reading-illustration.png'), badge: 'bg-accent/10 text-accent' }
+};
+
+const skillsByLanguage = {
+  english: ['reading', 'listening', 'writing', 'speaking'],
+  japanese: ['vocabulary', 'grammar']
 };
 
 const partCountBySkill = { reading: 4, listening: 3, speaking: 2, writing: 2, vocabulary: 5, grammar: 5 };
@@ -45,14 +51,13 @@ const getExercisePart = (exercise) => {
 
 function HomePage() {
   const navigate = useNavigate();
-  const [headerNav, setHeaderNav] = useState('dashboard');
   const [exercises, setExercises] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSkill, setSelectedSkill] = useState('');
   const [selectedParts, setSelectedParts] = useState([]);
-  const [selectedLanguage, setSelectedLanguage] = useState('all');
+  const [selectedLanguage, setSelectedLanguage] = useState('english');
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
   useEffect(() => {
@@ -83,11 +88,8 @@ function HomePage() {
   };
 
   useEffect(() => {
-    if (selectedLanguage === 'japanese') {
-      setSelectedSkill((prev) => (['reading', 'listening', 'vocabulary', 'grammar'].includes(prev) ? prev : ''));
-    } else if (selectedLanguage === 'english') {
-      setSelectedSkill((prev) => (['reading', 'listening', 'writing', 'speaking'].includes(prev) ? prev : ''));
-    }
+    const allowedSkills = skillsByLanguage[selectedLanguage] || skillsByLanguage.english;
+    setSelectedSkill((prev) => (allowedSkills.includes(prev) ? prev : ''));
 
     if (!selectedSkill) {
       setSelectedParts([]);
@@ -113,12 +115,19 @@ function HomePage() {
       });
     }
 
-    if (selectedSkill) {
+    const hasSkillFilter = Boolean(selectedSkill);
+    const hasPartFilter = selectedParts.length > 0;
+
+    if (hasSkillFilter) {
       items = items.filter((exercise) => exercise.skill_type === selectedSkill);
     }
 
-    if (selectedParts.length > 0) {
+    if (hasPartFilter) {
       items = items.filter((exercise) => selectedParts.includes(getExercisePart(exercise)));
+    }
+
+    if (!hasSkillFilter && !hasPartFilter && !query) {
+      return items;
     }
 
     if (!query) return items;
@@ -173,22 +182,15 @@ function HomePage() {
           <div className="hidden md:flex items-center justify-center">
             <nav className="inline-flex items-center gap-3 rounded-full bg-background/60 p-1">
               <button
-                onClick={() => { setHeaderNav('dashboard'); handleExerciseLanguageNav('all'); navigate('/'); }}
-                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${headerNav === 'dashboard' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
-              >
-                <LibraryBig className="h-4 w-4" />
-                Dashboard
-              </button>
-              <button
-                onClick={() => { setHeaderNav('english'); handleExerciseLanguageNav('english'); /* stay on dashboard and filter */ }}
-                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${headerNav === 'english' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
+                onClick={() => { handleExerciseLanguageNav('english'); }}
+                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${selectedLanguage === 'english' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
               >
                 <BookOpen className="h-4 w-4" />
                 English
               </button>
               <button
-                onClick={() => { setHeaderNav('japanese'); handleExerciseLanguageNav('japanese'); /* stay on dashboard and filter */ }}
-                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${headerNav === 'japanese' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
+                onClick={() => { handleExerciseLanguageNav('japanese'); }}
+                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${selectedLanguage === 'japanese' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
               >
                 <BookOpen className="h-4 w-4" />
                 Japanese
@@ -234,7 +236,7 @@ function HomePage() {
               <div>
                 <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Skill</h3>
                 <div className="space-y-1">
-                  {Object.keys(skillMeta).map((skillKey) => {
+                  {(skillsByLanguage[selectedLanguage] || skillsByLanguage.english).map((skillKey) => {
                     const meta = skillMeta[skillKey];
                     const Icon = meta.icon;
                     const active = selectedSkill === skillKey;

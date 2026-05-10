@@ -122,7 +122,7 @@ export const generatePracticeExercises = async (req, res) => {
       });
     }
 
-    const exercises = await generateExercises(topic, difficulty, count);
+    const exercises = await generateExercises(difficulty, count);
     console.log('[AI Controller] generatePracticeExercises success', {
       mode: 'general',
       durationMs: Date.now() - startedAt,
@@ -133,7 +133,6 @@ export const generatePracticeExercises = async (req, res) => {
     console.error('[AI Controller] generatePracticeExercises failed', {
       route: '/api/ai/generate-exercises or /api/ai/teacher/generate-exercises',
       body: {
-        topic: req.body?.topic,
         difficulty: req.body?.difficulty,
         count: req.body?.count,
         course_id: req.body?.course_id,

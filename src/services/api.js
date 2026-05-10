@@ -28,11 +28,21 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status;
-    if (status === 401 || status === 403) {
+    if (status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';
+      return Promise.reject(error);
     }
+
+    if (status === 403) {
+      console.warn('[API] Forbidden request blocked', {
+        url: error.config?.url,
+        method: error.config?.method,
+        message: error.response?.data?.message || error.message
+      });
+    }
+
     return Promise.reject(error);
   }
 );
