@@ -162,8 +162,8 @@ export const generateExercises = async (difficulty, count = 5) => {
   try {
     const safeCount = Number.isFinite(Number(count)) ? Math.min(Math.max(Number(count), 1), 20) : 5;
     const aiText = await generateGeminiText({
-      systemInstruction: 'You are an English exercise generator. Return strict JSON only.',
-      userPrompt: `Generate ${safeCount} ${difficulty} level English exercises. Return JSON array only. Each item must have: question, options (array, can be empty for speaking/writing), correctAnswer, explanation.`,
+      systemInstruction: 'Return strict JSON only.',
+      userPrompt: `Generate ${safeCount} exercises for difficulty ${difficulty}. Return JSON array only. Each item must include question, options, correctAnswer, explanation.`,
       temperature: 0.6,
       maxOutputTokens: 1400
     });
@@ -210,35 +210,8 @@ export const generateExercisesForCourseSkill = async ({ skill, cefrLevel, count 
         : safeCount;
 
       aiText = await generateGeminiText({
-        systemInstruction: [
-          'You are an expert English teacher.',
-          'Generate a complete exercise set by CEFR level and language skill for an LMS.',
-          'Return strict JSON only, no markdown, no extra text.',
-          'Output must be a JSON object with keys: readingPassage (string), taskPrompt (string), sampleAnswer (string), questions (array).',
-          'Each question must have keys: question (string), options (string[]), correctAnswer (string), explanation (string).',
-          'For multiple-choice questions, create 4 options and correctAnswer must match one option exactly.',
-          'For writing and speaking, questions may be [] and sampleAnswer must be filled.',
-          'For reading, taskPrompt should be empty and readingPassage should be meaningful.',
-          'For listening, readingPassage should be empty and taskPrompt should describe listening task in English.',
-          'The grammar, vocabulary, and complexity must match the CEFR level exactly.',
-          'Keep JSON compact and valid. Do not end output with dangling comma.',
-          'For reading/listening: keep passage concise (about 180-260 words) and explanations short (<= 20 words).'
-        ].join(' '),
-        userPrompt: [
-          `Create an English exercise set.`,
-          `Skill: ${safeSkill}.`,
-          `CEFR Level: ${safeLevel}.`,
-          safeSkill === 'reading' || safeSkill === 'listening'
-            ? `Question count target: ${retryCount}.`
-            : 'Question count target: 0 (task-based response).',
-          optionalTopic ? `Focus topic: ${optionalTopic}.` : 'Use a practical daily-life/business mix suitable for this level.',
-          skillGuide[safeSkill] || '',
-          safeSkill === 'listening' && audioInput ? 'The audio file is provided in the message. Base questions on that audio content.' : '',
-          'Questions and prompts must be in English.',
-          'Explanations can be concise and Vietnamese-friendly.',
-          isRetry ? 'Previous response was invalid/truncated JSON. Return a shorter but complete valid JSON object now.' : '',
-          'Return JSON object only.'
-        ].join(' '),
+        systemInstruction: 'Return strict JSON only. Provide keys: readingPassage, taskPrompt, sampleAnswer, questions.',
+        userPrompt: `Create an exercise set. Skill: ${safeSkill}. CEFR: ${safeLevel}. Question count target: ${retryCount}. Topic: ${optionalTopic || 'general'}. Return a compact JSON object only.`,
         userParts,
         temperature: isRetry ? 0.3 : 0.5,
         maxOutputTokens: 4096,
@@ -337,22 +310,8 @@ export const refineExerciseSet = async ({ skill, cefrLevel, feedback, currentExe
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const isRetry = attempt > 1;
     aiText = await generateGeminiText({
-      systemInstruction: [
-        'You are an English assessment editor.',
-        'Revise the exercise according to teacher feedback while keeping the same CEFR level and skill.',
-        'Return strict JSON only with the same structure:',
-        'readingPassage, taskPrompt, sampleAnswer, questions.',
-        'Do not add markdown or extra commentary.',
-        'Keep output compact and valid JSON. Do not end with dangling commas.'
-      ].join(' '),
-      userPrompt: [
-        `Skill: ${safeSkill}.`,
-        `CEFR Level: ${safeLevel}.`,
-        `Teacher feedback: ${safeFeedback}.`,
-        `Current exercise JSON: ${JSON.stringify(compactCurrent)}`,
-        isRetry ? 'Previous output was invalid/truncated JSON. Return a shorter but complete valid JSON object now.' : '',
-        'Revise the exercise to match the feedback.'
-      ].join(' '),
+      systemInstruction: 'Return strict JSON only with keys: readingPassage, taskPrompt, sampleAnswer, questions.',
+      userPrompt: `Revise exercise JSON per teacher feedback. Skill: ${safeSkill}. CEFR: ${safeLevel}. Feedback: ${safeFeedback}. Return compact JSON object only.`,
       temperature: isRetry ? 0.25 : 0.4,
       maxOutputTokens: 4096,
       forceJsonOutput: true
@@ -389,24 +348,8 @@ export const refineExerciseSet = async ({ skill, cefrLevel, feedback, currentExe
     let patchObj = null;
     for (let patchAttempt = 1; patchAttempt <= 2; patchAttempt += 1) {
       patchText = await generateGeminiText({
-        systemInstruction: [
-          'You revise exercises by returning compact JSON patch only.',
-          'Return strict JSON object only, no markdown.',
-          'Allowed keys: readingPassage, taskPrompt, sampleAnswer, questions.',
-          'Include only fields that need changes based on feedback.',
-          'Keep output short and valid JSON.'
-        ].join(' '),
-        userPrompt: [
-          `Skill: ${safeSkill}.`,
-          `CEFR Level: ${safeLevel}.`,
-          `Feedback: ${safeFeedback}.`,
-          `Current readingPassage: ${compactCurrent.readingPassage}`,
-          `Current taskPrompt: ${compactCurrent.taskPrompt}`,
-          `Current sampleAnswer: ${compactCurrent.sampleAnswer}`,
-          `Current questions: ${JSON.stringify(compactCurrent.questions).slice(0, 2400)}`,
-          'If feedback asks to make reading longer, return only readingPassage.',
-          'Return JSON object patch only.'
-        ].join(' '),
+        systemInstruction: 'Return a compact JSON object patch only. Allowed keys: readingPassage, taskPrompt, sampleAnswer, questions.',
+        userPrompt: `Skill: ${safeSkill}. CEFR: ${safeLevel}. Feedback: ${safeFeedback}. Current questions length: ${compactCurrent.questions.length}. Return JSON patch only.`,
         temperature: 0.2,
         maxOutputTokens: 1800,
         forceJsonOutput: true

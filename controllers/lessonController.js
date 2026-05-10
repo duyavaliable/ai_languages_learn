@@ -1,15 +1,8 @@
-import { Lesson, Vocabulary, Grammar, Language, UserProgress } from '../models/index.js';
-
-const normalizeSkillType = (skill) => {
-  if (!skill) return null;
-  const value = String(skill).trim().toLowerCase();
-  const supported = ['listening', 'speaking', 'reading', 'writing'];
-  return supported.includes(value) ? value : null;
-};
+import { Lesson, Language, UserProgress } from '../models/index.js';
 
 export const getLessons = async (req, res) => {
   try {
-    const { languageId, courseId, skill, exerciseOnly } = req.query;
+    const { languageId, courseId } = req.query;
     const where = { is_deleted: false };
 
     const resolvedLanguageId = languageId || courseId;
@@ -17,25 +10,9 @@ export const getLessons = async (req, res) => {
       where.language_id = resolvedLanguageId;
     }
 
-    const skillType = normalizeSkillType(skill);
-    if (skill) {
-      if (!skillType) {
-        return res.status(400).json({ message: 'skill must be listening, speaking, reading or writing' });
-      }
-      where.skill_type = skillType;
-    }
-
-    if (exerciseOnly === 'true') {
-      where.is_ai_exercise = true;
-    }
-
     const lessons = await Lesson.findAll({
       where,
-      include: [
-        { model: Vocabulary, as: 'vocabularyItems' },
-        { model: Grammar, as: 'grammarPoints' }
-      ],
-      order: [['lesson_order', 'ASC']]
+      order: [['id', 'ASC']]
     });
 
     res.json(lessons);
@@ -49,8 +26,6 @@ export const getLessonById = async (req, res) => {
     const lesson = await Lesson.findOne({
       where: { id: req.params.id, is_deleted: false },
       include: [
-        { model: Vocabulary, as: 'vocabularyItems' },
-        { model: Grammar, as: 'grammarPoints' },
         { model: Language, as: 'language' }
       ]
     });
@@ -71,10 +46,7 @@ export const createLesson = async (req, res) => {
       language_id,
       course_id,
       title,
-      content,
-      lesson_order,
-      skill_type,
-      is_ai_exercise
+      lesson_order
     } = req.body;
 
     const resolvedLanguageId = language_id || course_id;
@@ -83,18 +55,10 @@ export const createLesson = async (req, res) => {
       return res.status(400).json({ message: 'language_id and title are required' });
     }
 
-    const normalizedSkillType = normalizeSkillType(skill_type);
-    if (skill_type && !normalizedSkillType) {
-      return res.status(400).json({ message: 'skill_type must be listening, speaking, reading or writing' });
-    }
-
     const lesson = await Lesson.create({
       language_id: resolvedLanguageId,
       title,
-      content,
       lesson_order: lesson_order || 1,
-      skill_type: normalizedSkillType,
-      is_ai_exercise: Boolean(is_ai_exercise),
       is_deleted: false
     });
     res.status(201).json(lesson);
@@ -116,14 +80,6 @@ export const updateLesson = async (req, res) => {
       req.body.language_id = resolvedLanguageId;
     }
 
-    if (Object.prototype.hasOwnProperty.call(req.body, 'skill_type')) {
-      const normalizedSkillType = normalizeSkillType(req.body.skill_type);
-      if (req.body.skill_type && !normalizedSkillType) {
-        return res.status(400).json({ message: 'skill_type must be listening, speaking, reading or writing' });
-      }
-      req.body.skill_type = normalizedSkillType;
-    }
-
     await lesson.update(req.body);
     res.json(lesson);
   } catch (error) {
@@ -142,7 +98,6 @@ export const getDeletedLessons = async (req, res) => {
 
     const lessons = await Lesson.findAll({
       where,
-      include: [{ model: Language, as: 'language' }],
       order: [['lesson_order', 'ASC']]
     });
     res.json(lessons);

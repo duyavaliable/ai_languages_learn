@@ -209,7 +209,12 @@ export const previewExerciseFile = async (req, res) => {
     const skill = req.body?.skill || req.query?.skill || 'speaking';
     const normalizedSkill = normalizeSkillType(skill) || 'speaking';
     const parsed = await parseExerciseParts(req.file, { skill: normalizedSkill });
-    return res.json({ fileType: parsed.fileType, parts: parsed.parts || [], rawText: parsed.rawText || '' });
+    return res.json({
+      fileType: parsed.fileType,
+      parts: parsed.parts || [],
+      rawText: parsed.rawText || '',
+      writingMeta: parsed.writingMeta || null
+    });
   } catch (error) {
     return res.status(400).json({ message: error.message });
   }

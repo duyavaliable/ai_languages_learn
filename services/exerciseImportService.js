@@ -186,29 +186,29 @@ const QUESTION_CONTINUATION_STARTERS = /^(if|why|what|where|when|who|whom|which|
 const isNewSentenceMarker = (line) => {
   const trimmed = String(line || '').trim();
   return /^[-•*]\s+\S/.test(trimmed) ||  // Gạch ngang/chấm: "- What", "• Do you"
-         /^\d+[\.\)]\s+\S/.test(trimmed) ||  // Số: "1. Do you", "2) What"
-         /^[0-9]+\s+[A-Za-z]/.test(trimmed);  // Số rồi chữ: "1 Do you"
+    /^\d+[\.\)]\s+\S/.test(trimmed) ||  // Số: "1. Do you", "2) What"
+    /^[0-9]+\s+[A-Za-z]/.test(trimmed);  // Số rồi chữ: "1 Do you"
 };
 
 const shouldMergeWithPreviousLine = (line, previousLine) => {
   if (!line || !previousLine) return false;
-  
+
   // Nếu dòng hiện tại là dấu hiệu câu mới -> không ghép
   if (isNewSentenceMarker(line)) return false;
-  
+
   // Nếu dòng hiện tại là header hoặc bullet -> không ghép
   if (isPartHeaderLine(line)) return false;
-  
+
   // Nếu dòng trước kết thúc bằng ? hoặc : và dòng hiện tại bắt đầu với từ hỏi -> ghép
   if (previousLine.endsWith('?') || previousLine.endsWith(':')) {
     return QUESTION_CONTINUATION_STARTERS.test(line);
   }
-  
+
   // Nếu dòng trước là bullet và dòng hiện tại bắt đầu với từ hỏi -> ghép
   if (/^-\s/.test(previousLine)) {
     return QUESTION_CONTINUATION_STARTERS.test(line);
   }
-  
+
   return false;
 };
 
@@ -335,8 +335,10 @@ const extractRelevantParts = (rawText, options = {}) => {
   if (!rawText) return [];
   const skill = options.skill || 'speaking';
 
-  // Section heading patterns: PART, PASSAGE, SECTION, or all-caps lines
-  const sectionRegex = /^(PART|PASSAGE|SECTION)\s*[\w\d]+[\s:\-].*?(?=^PART|^PASSAGE|^SECTION|\z)/gims;
+  // Section heading patterns: robustly detect many common exam headings
+  // Old pattern was too strict; use a looser heading matcher and then slice
+  // the document from each heading index to the next heading index.
+  const sectionRegex = /^\s*(PART|PASSAGE|SECTION|TASK|TOPIC|SITUATION|QUESTION)\s*[IVX\d]+\.?[\s:\-]?/gim;
   const lines = String(rawText || '').split(/\r?\n/).map((l) => l.trim());
   const filtered = lines.filter((l) => {
     if (!l) return false;
@@ -347,10 +349,23 @@ const extractRelevantParts = (rawText, options = {}) => {
     return true;
   }).join('\n');
 
-  // Try to split by section headings
-  const matches = [...String(filtered).matchAll(sectionRegex)].map((m) => m[0].trim());
+  // Try to split by section headings using heading indices so we capture
+  // the full text for each section (heading + body) even when headings
+  // vary in formatting.
+  const matchIter = String(filtered).matchAll(sectionRegex);
+  const matches = [...matchIter];
   if (matches.length) {
-    return matches.map((text) => {
+    const sections = [];
+    for (let i = 0; i < matches.length; i += 1) {
+      const start = typeof matches[i].index === 'number' ? matches[i].index : 0;
+      const end = (i + 1 < matches.length && typeof matches[i + 1].index === 'number')
+        ? matches[i + 1].index
+        : filtered.length;
+      const sectionText = String(filtered).slice(start, end).trim();
+      if (sectionText) sections.push(sectionText);
+    }
+
+    return sections.map((text) => {
       const firstLine = (String(text).split(/\r?\n/)[0] || '').trim();
       return {
         title: fixSpacing(firstLine),
@@ -366,6 +381,70 @@ const extractRelevantParts = (rawText, options = {}) => {
     content: fixSpacing(filtered, { preserveLineBreaks: true }),
     skill
   }];
+};
+
+const WRITING_MARKER_REGEX = /you\s*should\s*spend\s*20\s*minutes\s*on\s*this\s*task\.?/i;
+const WRITING_STOP_REGEX = /(?:you\s*should\s*write\s*at\s*least|write\s*at\s*least)\s*\d+\s*(?:[-–—]\s*\d+)?\s*words?\.?/i;
+
+const buildWritingCandidates = (rawText) => {
+  const normalized = fixSpacing(String(rawText || ''), { preserveLineBreaks: true });
+  const blocks = normalized
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter((block) => block.length >= 20)
+    .map((block, index) => ({
+      id: index + 1,
+      title: `Đoạn ${index + 1}`,
+      content: block,
+      skill: 'writing'
+    }));
+
+  return blocks.slice(0, 8);
+};
+
+const extractWritingPromptByMarker = (rawText) => {
+  const source = String(rawText || '').replace(/\r/g, '').trim();
+  if (!source) {
+    return {
+      markerFound: false,
+      prompt: '',
+      candidates: buildWritingCandidates(rawText)
+    };
+  }
+
+  const markerMatch = source.match(WRITING_MARKER_REGEX);
+  if (!markerMatch || typeof markerMatch.index !== 'number') {
+    return {
+      markerFound: false,
+      prompt: '',
+      candidates: buildWritingCandidates(rawText)
+    };
+  }
+
+  const markerEnd = markerMatch.index + markerMatch[0].length;
+  let tail = source.slice(markerEnd).trim();
+
+  const stopMatch = tail.match(WRITING_STOP_REGEX);
+  if (stopMatch && typeof stopMatch.index === 'number') {
+    tail = tail.slice(0, stopMatch.index).trim();
+  }
+
+  // Remove list bullets/leading punctuation noise while preserving line breaks for UI readability.
+  const prompt = fixSpacing(
+    tail
+      .replace(/^[\s:\-–—]+/, '')
+      .replace(/[•·]/g, '- '),
+    { preserveLineBreaks: true }
+  );
+
+  const hasPrompt = Boolean(prompt && prompt.length >= 10);
+  return {
+    markerFound: true,
+    prompt: hasPrompt ? prompt : '',
+    candidates: hasPrompt
+      ? [{ id: 1, title: 'Writing prompt (auto)', content: prompt, skill: 'writing' }]
+      : buildWritingCandidates(rawText)
+  };
 };
 
 // Extract questions/options/correct answer from a part (for both listening/reading)
@@ -398,10 +477,10 @@ export async function extractQuestionsFromPart(text, options = {}) {
         if (optMatch) {
           const optText = String(optMatch[3] || '').trim();
           const fullLine = lines[i].trim();
-          
+
           // Detect correct answer markers: (A) / (B.) / (C) at start of line
           const isMarkedCorrect = /^\(\s*[A-Da-d]\s*\.?\s*\)/.test(fullLine);
-          
+
           if (isMarkedCorrect) {
             correctAnswer = optText;
           }
@@ -424,7 +503,7 @@ export async function extractQuestionsFromPart(text, options = {}) {
       }
 
       const questionText = qTextParts.join(' ').trim();
-      
+
       // If no correct answer found in-line, check the answer key
       if (!correctAnswer && answerKey[qNumber]) {
         const correctLetter = answerKey[qNumber];
@@ -477,7 +556,7 @@ const findCorrectAnswerWithAi = async (question, options, passageContext = '', l
   const systemInstruction = isJapanese
     ? 'You are an expert in Japanese reading comprehension. Your task is to identify the single best answer for a multiple-choice question based on the provided context. The user will provide a question and a list of options. You must choose one of the provided options. Respond with only the exact text of the correct option, and nothing else. Do not add any explanation or introductory text.'
     : 'You are an expert in English language and reading comprehension. Your task is to identify the single best answer for a multiple-choice question based on the provided context. The user will provide a question and a list of options. You must choose one of the provided options. Respond with only the exact text of the correct option, and nothing else. Do not add any explanation or introductory text.';
-  
+
   const userPrompt = `${isJapanese ? 'Japanese' : 'Reading'} passage/context:
 "${String(passageContext || '').trim()}"
 
@@ -498,7 +577,7 @@ Based on general knowledge and the context implied by the question, which option
   const aiAnswer = String(result || '').trim();
   // Find the closest match in the original options to avoid hallucinations
   const bestMatch = options.find(opt => aiAnswer.includes(opt) || opt.includes(aiAnswer));
-  
+
   return bestMatch || null;
 };
 
@@ -522,8 +601,27 @@ export const parseExerciseParts = async (file, options = {}) => {
 
   // DOCX/TXT: always text parser only, never OCR
   if (parsed.fileType !== 'pdf') {
-    const parts = skill === 'reading' 
-      ? extractReadingParts(raw) 
+    if (skill === 'writing') {
+      const writingParsed = extractWritingPromptByMarker(raw);
+      const parts = writingParsed.markerFound && writingParsed.prompt
+        ? [{ title: 'Writing prompt (auto)', content: writingParsed.prompt, skill: 'writing' }]
+        : [];
+      return {
+        fileType: parsed.fileType,
+        rawText: raw,
+        skill,
+        parts,
+        writingMeta: {
+          markerFound: writingParsed.markerFound,
+          detectedPrompt: writingParsed.prompt,
+          requiresManualConfirm: !writingParsed.markerFound,
+          candidates: writingParsed.candidates
+        }
+      };
+    }
+
+    const parts = skill === 'reading'
+      ? extractReadingParts(raw)
       : extractRelevantParts(raw, { skill });
     return {
       fileType: parsed.fileType,
@@ -546,6 +644,25 @@ export const parseExerciseParts = async (file, options = {}) => {
         // OCR unavailable -> continue with original raw
       }
     }
+  }
+
+  if (skill === 'writing') {
+    const writingParsed = extractWritingPromptByMarker(raw);
+    const parts = writingParsed.markerFound && writingParsed.prompt
+      ? [{ title: 'Writing prompt (auto)', content: writingParsed.prompt, skill: 'writing' }]
+      : [];
+    return {
+      fileType: parsed.fileType,
+      rawText: raw,
+      skill,
+      parts,
+      writingMeta: {
+        markerFound: writingParsed.markerFound,
+        detectedPrompt: writingParsed.prompt,
+        requiresManualConfirm: !writingParsed.markerFound,
+        candidates: writingParsed.candidates
+      }
+    };
   }
 
   const parts = skill === 'reading'

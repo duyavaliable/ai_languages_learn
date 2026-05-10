@@ -97,6 +97,7 @@ function ExerciseAttemptPage() {
   const [speakingAudioDuration, setSpeakingAudioDuration] = useState(0);
   const [writingStructureTips, setWritingStructureTips] = useState([]);
   const [writingSampleAnswer, setWritingSampleAnswer] = useState('');
+  const [writingAiLoading, setWritingAiLoading] = useState(false);
   const [speakingError, setSpeakingError] = useState('');
 
   const goBack = () => {
@@ -362,28 +363,28 @@ function ExerciseAttemptPage() {
 
       mr.onstop = async () => {
         console.log('[MediaRecorder] onstop callback triggered');
-        
+
         setTimeout(async () => {
-            const blob = new Blob(audioChunksRef.current, {
-              type: audioChunksRef.current[0]?.type || 'audio/webm'
-            });
+          const blob = new Blob(audioChunksRef.current, {
+            type: audioChunksRef.current[0]?.type || 'audio/webm'
+          });
 
-            // Store blob for later submission (don't auto-submit)
-            recordingBlobRef.current = blob;
-            console.log('[MediaRecorder] Blob stored, size:', blob.size);
-            
-            const blobUrl = URL.createObjectURL(blob);
-            if (recordingAudioRef.current) {
-              recordingAudioRef.current.src = blobUrl;
-              console.log('[MediaRecorder] Audio element src set');
-            }
+          // Store blob for later submission (don't auto-submit)
+          recordingBlobRef.current = blob;
+          console.log('[MediaRecorder] Blob stored, size:', blob.size);
 
-            try {
-              stream.getTracks().forEach((t) => t.stop());
-            } catch (e) {}
+          const blobUrl = URL.createObjectURL(blob);
+          if (recordingAudioRef.current) {
+            recordingAudioRef.current.src = blobUrl;
+            console.log('[MediaRecorder] Audio element src set');
+          }
 
-            streamRef.current = null;
-          }, 300);
+          try {
+            stream.getTracks().forEach((t) => t.stop());
+          } catch (e) { }
+
+          streamRef.current = null;
+        }, 300);
       };
 
       mediaRecorderRef.current = mr;
@@ -481,7 +482,7 @@ function ExerciseAttemptPage() {
         timeout: 120000
       });
       const json = res.data || {};
-      
+
       console.log('[sendToServer] Response received', {
         hasPronunciationScore: !!json.pronunciation_score,
         hasFluencyScore: !!json.fluency_score,
@@ -496,7 +497,7 @@ function ExerciseAttemptPage() {
         setSpeechTranscript(serverTranscript);
         console.log('[sendToServer] Server transcript set', { length: serverTranscript.length });
       }
-      
+
       setSpeakingResult(json);
       setSpeakingReportOpen(true);
       setSubmitted(true);
@@ -947,17 +948,17 @@ function ExerciseAttemptPage() {
                       {(
                         speakingResult
                           ? [
-                              { label: 'Fluency', value: (speakingResult.fluency_score ?? speakingResult.fluency ?? null) ? `${speakingResult.fluency_score ?? speakingResult.fluency}/100` : '—' },
-                              { label: 'Grammar', value: speakingResult.grammar_score ? `${speakingResult.grammar_score}/100` : '—' },
-                              { label: 'Vocabulary', value: speakingResult.vocabulary_score ? `${speakingResult.vocabulary_score}/100` : '—' },
-                              { label: 'Pronunciation', value: (speakingResult.pronunciation_score ?? speakingResult.pronunciation ?? null) ? `${speakingResult.pronunciation_score ?? speakingResult.pronunciation}/100` : '—' },
-                            ]
+                            { label: 'Fluency', value: (speakingResult.fluency_score ?? speakingResult.fluency ?? null) ? `${speakingResult.fluency_score ?? speakingResult.fluency}/100` : '—' },
+                            { label: 'Grammar', value: speakingResult.grammar_score ? `${speakingResult.grammar_score}/100` : '—' },
+                            { label: 'Vocabulary', value: speakingResult.vocabulary_score ? `${speakingResult.vocabulary_score}/100` : '—' },
+                            { label: 'Pronunciation', value: (speakingResult.pronunciation_score ?? speakingResult.pronunciation ?? null) ? `${speakingResult.pronunciation_score ?? speakingResult.pronunciation}/100` : '—' },
+                          ]
                           : [
-                              { label: 'Fluency', value: '—' },
-                              { label: 'Grammar', value: '—' },
-                              { label: 'Vocabulary', value: '—' },
-                              { label: 'Pronunciation', value: '—' },
-                            ]
+                            { label: 'Fluency', value: '—' },
+                            { label: 'Grammar', value: '—' },
+                            { label: 'Vocabulary', value: '—' },
+                            { label: 'Pronunciation', value: '—' },
+                          ]
                       ).map((item) => (
                         <div key={item.label} className="rounded-2xl border border-border bg-background p-3">
                           <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{item.label}</div>
@@ -984,8 +985,8 @@ function ExerciseAttemptPage() {
                               ? [speakingResult.feedback]
                               : []
                             : Array.isArray(speakingResult?.feedback)
-                            ? speakingResult.feedback
-                            : [];
+                              ? speakingResult.feedback
+                              : [];
 
                         if (feedbackList.length > 0) {
                           return feedbackList.slice(0, 5).map((f, i) => (
@@ -1097,7 +1098,7 @@ function ExerciseAttemptPage() {
         )}
       </main>
 
-      
+
 
       {!loading && !error && hasQuestions && !isWriting && !isSpeaking && (
         <footer className="sticky bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur-xl shadow-sticky">

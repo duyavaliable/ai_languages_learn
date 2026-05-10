@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
@@ -86,6 +86,12 @@ function TeacherCreateContent() {
   const [exerciseParts, setExerciseParts] = useState([]);
   const [exercisePreviewLoading, setExercisePreviewLoading] = useState(false);
   const [exerciseSelectedParts, setExerciseSelectedParts] = useState([]);
+  const [exercisePreviewRawText, setExercisePreviewRawText] = useState('');
+  const [exerciseWritingCandidates, setExerciseWritingCandidates] = useState([]);
+  const [exerciseWritingManualPrompt, setExerciseWritingManualPrompt] = useState('');
+  const [exerciseWritingMarkerFound, setExerciseWritingMarkerFound] = useState(false);
+  const [exerciseWritingConfirmed, setExerciseWritingConfirmed] = useState(false);
+  const exerciseRawTextRef = useRef(null);
   const [vocabularyLessonLoading, setVocabularyLessonLoading] = useState(false);
   const [vocabularyLoading, setVocabularyLoading] = useState(false);
   const [vocabularyMsg, setVocabularyMsg] = useState(null);
@@ -314,6 +320,11 @@ function TeacherCreateContent() {
       return;
     }
 
+    if (exerciseForm.skill === 'writing' && !exerciseWritingConfirmed) {
+      showMsg('error', 'Vui lòng xác nhận đề writing trước khi tạo bài.');
+      return;
+    }
+
     setGenerateLoading(true);
     try {
       const createdItems = [];
@@ -408,6 +419,11 @@ function TeacherCreateContent() {
     setExerciseFile(null);
     setExerciseParts([]);
     setExerciseSelectedParts([]);
+    setExercisePreviewRawText('');
+    setExerciseWritingCandidates([]);
+    setExerciseWritingManualPrompt('');
+    setExerciseWritingMarkerFound(false);
+    setExerciseWritingConfirmed(false);
   };
 
   const handleExerciseCourseChange = (courseId) => {
@@ -424,12 +440,29 @@ function TeacherCreateContent() {
   const handleExerciseLanguageChange = (languageId) => {
     const selectedLanguage = languages.find((lang) => String(lang.id) === String(languageId));
     const isJapanese = String(selectedLanguage?.code || '').toLowerCase() === 'ja';
-    setExerciseForm((prev) => ({
-      ...prev,
-      language_id: languageId,
-      skill: isJapanese ? 'vocabulary' : 'reading',
-      cefrLevel: isJapanese ? 'N5' : prev.cefrLevel
-    }));
+
+    setExerciseForm((prev) => {
+      // If switching to Japanese, default to a JP-specific skill. If switching
+      // to a non-Japanese language, preserve the user's previously-selected
+      // skill unless it was a JP-only skill (vocabulary/grammar).
+      const jpOnlySkills = ['vocabulary', 'grammar'];
+      let newSkill = prev.skill;
+      if (isJapanese) {
+        newSkill = 'vocabulary';
+      } else if (jpOnlySkills.includes(prev.skill)) {
+        newSkill = 'reading';
+      }
+
+      return {
+        ...prev,
+        language_id: languageId,
+        skill: newSkill,
+        cefrLevel: isJapanese ? 'N5' : prev.cefrLevel
+      };
+    });
+
+    // Update lessons related to the selected language
+    fetchLessonsForLanguage(languageId, setExerciseLessons, setExerciseLessonLoading);
   };
 
   const handleVocabularyLanguageChange = (languageId) => {
@@ -477,6 +510,41 @@ function TeacherCreateContent() {
     setExerciseFile(file || null);
     setExerciseParts([]);
     setExerciseSelectedParts([]);
+    setExercisePreviewRawText('');
+    setExerciseWritingCandidates([]);
+    setExerciseWritingManualPrompt('');
+    setExerciseWritingMarkerFound(false);
+    setExerciseWritingConfirmed(false);
+  };
+
+  const useSelectedRawTextAsWritingPrompt = () => {
+    const el = exerciseRawTextRef.current;
+    if (!el) return;
+    const start = Number(el.selectionStart || 0);
+    const end = Number(el.selectionEnd || 0);
+    const selected = String(exercisePreviewRawText || '').slice(start, end).trim();
+
+    if (!selected) {
+      showMsg('error', 'Vui lòng bôi đen đoạn đề bài trong ô nội dung thô trước khi chọn.');
+      return;
+    }
+
+    setExerciseWritingManualPrompt(selected);
+    setExerciseWritingConfirmed(false);
+    showMsg('success', 'Đã lấy đoạn bôi đen làm đề writing. Bạn có thể chỉnh sửa thêm trước khi xác nhận.');
+  };
+
+  const confirmWritingPrompt = () => {
+    const prompt = String(exerciseWritingManualPrompt || '').trim();
+    if (!prompt) {
+      showMsg('error', 'Vui lòng nhập hoặc chọn đề writing trước khi xác nhận.');
+      return;
+    }
+
+    setExerciseParts([{ title: 'Writing prompt (manual)', content: prompt, skill: 'writing' }]);
+    setExerciseSelectedParts([0]);
+    setExerciseWritingConfirmed(true);
+    showMsg('success', 'Đã xác nhận đề writing. Bây giờ bạn có thể bấm tạo bài.');
   };
 
   const previewExerciseFile = async () => {
@@ -491,8 +559,31 @@ function TeacherCreateContent() {
       formData.append('skill', exerciseForm.skill);
       const res = await api.post('/exercises/preview-parts', formData, { timeout: 90000 });
       const parts = Array.isArray(res.data?.parts) ? res.data.parts : [];
+      const rawText = String(res.data?.rawText || '');
+      const writingMeta = res.data?.writingMeta || {};
+
+      setExercisePreviewRawText(rawText);
       setExerciseParts(parts);
       setExerciseSelectedParts(parts.map((_part, index) => index));
+
+      if (exerciseForm.skill === 'writing') {
+        const markerFound = Boolean(writingMeta?.markerFound);
+        const detectedPrompt = String(writingMeta?.detectedPrompt || parts?.[0]?.content || '').trim();
+        const candidates = Array.isArray(writingMeta?.candidates) ? writingMeta.candidates : [];
+
+        setExerciseWritingMarkerFound(markerFound);
+        setExerciseWritingCandidates(candidates);
+        setExerciseWritingManualPrompt(detectedPrompt);
+        setExerciseWritingConfirmed(markerFound && parts.length > 0);
+
+        if (markerFound && parts.length > 0) {
+          showMsg('success', 'Đã nhận diện đề writing theo dòng dấu hiệu. Bạn có thể tạo bài ngay hoặc chỉnh sửa lại đề.');
+        } else {
+          showMsg('info', 'Không tìm thấy dòng "You should spend 20 minutes on this task.". Hãy chọn/chỉnh đề thủ công rồi bấm Xác nhận.');
+        }
+        return;
+      }
+
       if (parts.length === 0) {
         showMsg('info', 'Không tìm thấy phần nội dung phù hợp trong tài liệu.');
       } else {
@@ -1060,7 +1151,14 @@ function TeacherCreateContent() {
                       ...p,
                       skill: nextSkill
                     }));
-                      if (!['listening'].includes(nextSkill)) {
+                    setExerciseParts([]);
+                    setExerciseSelectedParts([]);
+                    setExercisePreviewRawText('');
+                    setExerciseWritingCandidates([]);
+                    setExerciseWritingManualPrompt('');
+                    setExerciseWritingMarkerFound(false);
+                    setExerciseWritingConfirmed(false);
+                    if (!['listening'].includes(nextSkill)) {
                       setListeningAudioFile(null);
                     }
                   }}
@@ -1138,10 +1236,88 @@ function TeacherCreateContent() {
                 <button type="button" onClick={previewExerciseFile} style={styles.submitBtn} disabled={exercisePreviewLoading || !exerciseFile}>
                   {exercisePreviewLoading ? 'Đang quét...' : 'Quét nội dung'}
                 </button>
-                <button type="button" onClick={() => { setExerciseFile(null); setExerciseParts([]); setExerciseSelectedParts([]); }} style={styles.cancelBtn}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExerciseFile(null);
+                    setExerciseParts([]);
+                    setExerciseSelectedParts([]);
+                    setExercisePreviewRawText('');
+                    setExerciseWritingCandidates([]);
+                    setExerciseWritingManualPrompt('');
+                    setExerciseWritingMarkerFound(false);
+                    setExerciseWritingConfirmed(false);
+                  }}
+                  style={styles.cancelBtn}
+                >
                   Xóa
                 </button>
               </div>
+
+              {exerciseForm.skill === 'writing' && exercisePreviewRawText && (
+                <div style={{ marginTop: '12px', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px', background: '#f8fafc' }}>
+                  <div style={{ fontWeight: '700', marginBottom: '8px', color: '#1f2937' }}>Xác nhận đề Writing</div>
+                  <div style={{ fontSize: '13px', color: '#334155', marginBottom: '8px' }}>
+                    {exerciseWritingMarkerFound
+                      ? 'Đã tìm thấy dòng dấu hiệu. Bạn có thể chỉnh sửa đề nếu cần rồi xác nhận lại.'
+                      : 'Không tìm thấy dòng dấu hiệu. Hãy dùng 1 trong 2 cách: chọn từ Cards hoặc bôi đen nội dung thô.'}
+                  </div>
+
+                  {exerciseWritingCandidates.length > 0 && (
+                    <div style={{ marginBottom: '10px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px' }}>
+                        {exerciseWritingCandidates.map((item, idx) => (
+                          <button
+                            key={`writing-candidate-${idx}`}
+                            type="button"
+                            onClick={() => {
+                              setExerciseWritingManualPrompt(String(item?.content || '').trim());
+                              setExerciseWritingConfirmed(false);
+                            }}
+                            style={{ border: '1px solid #cbd5e1', borderRadius: '8px', background: '#fff', padding: '8px', textAlign: 'left', cursor: 'pointer' }}
+                          >
+                            <div style={{ fontWeight: '600', color: '#0f172a', marginBottom: '4px' }}>{item?.title || `Đoạn ${idx + 1}`}</div>
+                            <div style={{ color: '#475569', fontSize: '12px', whiteSpace: 'pre-wrap', maxHeight: '80px', overflow: 'hidden' }}>{item?.content}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {!exerciseWritingMarkerFound && (
+                    <div style={{ marginBottom: '10px' }}>
+                      <textarea
+                        ref={exerciseRawTextRef}
+                        style={{ ...styles.input, minHeight: '140px', resize: 'vertical', fontFamily: 'monospace' }}
+                        value={exercisePreviewRawText}
+                        readOnly
+                      />
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                        <button type="button" onClick={useSelectedRawTextAsWritingPrompt} style={styles.secondaryBtn}>Lấy đoạn đang bôi đen</button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label style={styles.label}>Đề writing đã chọn (cho phép chỉnh sửa)</label>
+                    <textarea
+                      style={{ ...styles.input, minHeight: '120px', resize: 'vertical' }}
+                      value={exerciseWritingManualPrompt}
+                      onChange={(e) => {
+                        setExerciseWritingManualPrompt(e.target.value);
+                        setExerciseWritingConfirmed(false);
+                      }}
+                      placeholder="Dán/chỉnh sửa đề writing tại đây"
+                    />
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button type="button" onClick={confirmWritingPrompt} style={styles.submitBtn}>Xác nhận đề Writing</button>
+                      <span style={{ fontSize: '12px', color: exerciseWritingConfirmed ? '#166534' : '#9a3412' }}>
+                        {exerciseWritingConfirmed ? 'Đã xác nhận - có thể tạo bài.' : 'Chưa xác nhận - chưa thể tạo bài.'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {exerciseParts.length > 0 && (
                 <div style={{ marginTop: '12px' }}>
@@ -1153,7 +1329,11 @@ function TeacherCreateContent() {
                     <button type="button" onClick={() => setExerciseSelectedParts([])} style={styles.secondaryBtn}>
                       Bỏ chọn tất cả
                     </button>
-                    <button type="submit" style={styles.submitBtn} disabled={generateLoading || (exerciseForm.skill === 'listening' && !listeningAudioFile)}>
+                    <button
+                      type="submit"
+                      style={styles.submitBtn}
+                      disabled={generateLoading || (exerciseForm.skill === 'listening' && !listeningAudioFile) || (exerciseForm.skill === 'writing' && !exerciseWritingConfirmed)}
+                    >
                       {generateLoading ? 'Đang tạo...' : `Tạo ${exerciseSelectedParts.length > 0 ? exerciseSelectedParts.length : exerciseParts.length} bài`}
                     </button>
                   </div>

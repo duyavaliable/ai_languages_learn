@@ -31,6 +31,7 @@ export const ensureDatabaseSchema = async () => {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       language_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
       title: { type: DataTypes.STRING(225), allowNull: false },
+      lesson_order: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
       is_deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }
     });
   } else {
@@ -39,7 +40,28 @@ export const ensureDatabaseSchema = async () => {
       type: DataTypes.INTEGER.UNSIGNED,
       allowNull: true // Allow null temporarily for existing records
     });
+    // Ensure lesson_order column exists (allowNull:true to avoid failing on existing rows)
+    await ensureColumn('lessons', 'lesson_order', {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 1
+    });
   }
+
+  // Create vocabulary table
+  if (!tableNames.includes('vocabulary')) {
+    await queryInterface.createTable('vocabulary', {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      lesson_id: { type: DataTypes.INTEGER, allowNull: false },
+      word: { type: DataTypes.STRING(225), allowNull: false },
+      pronunciation: { type: DataTypes.STRING(225), allowNull: true },
+      meaning: { type: DataTypes.TEXT, allowNull: false },
+      example_sentence: { type: DataTypes.TEXT, allowNull: true },
+      example_translation: { type: DataTypes.TEXT, allowNull: true },
+      audio_url: { type: DataTypes.STRING(225), allowNull: true }
+    });
+  }
+
 
   if (!tableNames.includes('exercises')) {
     await queryInterface.createTable('exercises', {
