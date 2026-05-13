@@ -42,6 +42,12 @@ MYSQL_USER=root
 MYSQL_PASSWORD=your_password
 JWT_SECRET=your_jwt_secret
 
+# Frontend API base URL
+# Leave empty for local development if you use the Vite proxy.
+# On Vercel, set this to your deployed backend, for example:
+# VITE_API_URL=https://your-backend.onrender.com/api
+VITE_API_URL=
+
 # Gemini API key (required for AI exercise generation)
 GEMINI_API_KEY=AIzaSy...
 # Optional model override
