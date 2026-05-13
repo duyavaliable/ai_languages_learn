@@ -1,6 +1,7 @@
 import { Exercise, Lesson, Language } from '../models/index.js';
 import { parseExerciseParts, extractQuestionsFromPart, extractPassageTextFromPart } from '../services/exerciseImportService.js';
 import { generateGeminiText } from '../services/aiService.js';
+import { getUploadsAudioDir, toPublicAudioUrl } from '../utils/storage.js';
 
 const normalizeSkillType = (skill) => {
   if (!skill) return null;
@@ -270,11 +271,11 @@ export const createExercisesFromParts = async (req, res) => {
       const fs = await import('fs/promises');
       const path = await import('path');
       const fname = `audio-${Date.now()}-${Math.random().toString(36).slice(2,9)}.${(req.file.mimetype||'audio').split('/').pop()}`;
-      const targetDir = path.resolve('uploads', 'audio');
+      const targetDir = getUploadsAudioDir();
       await fs.mkdir(targetDir, { recursive: true });
       const targetPath = path.join(targetDir, fname);
       await fs.writeFile(targetPath, req.file.buffer);
-      audioUrl = `/uploads/audio/${fname}`;
+      audioUrl = toPublicAudioUrl(fname);
     }
 
     const created = [];

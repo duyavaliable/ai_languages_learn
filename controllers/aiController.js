@@ -3,6 +3,7 @@ import { translateText } from '../services/translationService.js';
 import { Exercise } from '../models/index.js';
 import fs from 'fs/promises';
 import path from 'path';
+import { getUploadsAudioDir, toPublicAudioUrl } from '../utils/storage.js';
 
 const SUPPORTED_SKILLS = ['listening', 'speaking', 'reading', 'writing'];
 const SUPPORTED_CEFR = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
@@ -57,13 +58,13 @@ export const generatePracticeExercises = async (req, res) => {
 
         const ext = resolveAudioExt(req.file.mimetype);
         const fileName = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext}`;
-        const targetDir = path.resolve('uploads', 'audio');
+        const targetDir = getUploadsAudioDir();
         await fs.mkdir(targetDir, { recursive: true });
         const targetPath = path.join(targetDir, fileName);
         await fs.writeFile(targetPath, req.file.buffer);
 
         audioUpload = {
-          audioUrl: `/uploads/audio/${fileName}`,
+          audioUrl: toPublicAudioUrl(fileName),
           base64: req.file.buffer.toString('base64'),
           mimeType: req.file.mimetype
         };

@@ -37,9 +37,11 @@ npm install
 ```env
 PORT=5000
 MYSQL_HOST=localhost
+MYSQL_PORT=3306
 MYSQL_DATABASE=ai_languages_learn
 MYSQL_USER=root
 MYSQL_PASSWORD=your_password
+MYSQL_SSL=false
 JWT_SECRET=your_jwt_secret
 
 # Frontend API base URL
@@ -53,6 +55,12 @@ GEMINI_API_KEY=AIzaSy...
 # Optional model override
 GEMINI_MODEL=gemini-1.5-flash
 ```
+
+### Deploy backend to Vercel (Aiven MySQL)
+
+- Set backend envs on Vercel: `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_SSL=true`, `JWT_SECRET`, `GEMINI_API_KEY`.
+- Deploy this backend and copy its URL, for example: `https://your-backend.vercel.app`.
+- Set frontend env `VITE_API_URL=https://your-backend.vercel.app/api`.
 
 4. Start app:
 ```bash

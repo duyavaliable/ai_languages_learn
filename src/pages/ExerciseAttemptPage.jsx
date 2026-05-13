@@ -145,11 +145,28 @@ function ExerciseAttemptPage() {
   const readingPassage = String(exercise?.reading_passage || '').trim();
   const readingPassageDisplay = useMemo(() => extractIntroText(readingPassage), [readingPassage]);
   const taskPrompt = String(exercise?.task_prompt || exercise?.taskPrompt || writingPromptFromQuestions || exercise?.prompt || exercise?.reading_passage || '').trim();
+  const apiBase = String(import.meta.env.VITE_API_URL || '').trim();
+  const apiOrigin = useMemo(() => {
+    if (!apiBase) return '';
+    try {
+      return new URL(apiBase, window.location.origin).origin;
+    } catch (_err) {
+      return '';
+    }
+  }, [apiBase]);
   const speakingSampleAnswer = useMemo(
     () => String(speakingResult?.sample_answer || speakingResult?.sampleAnswer || exercise?.sample_answer || exercise?.sampleAnswer || '').trim(),
     [speakingResult, exercise]
   );
-  const audioUrl = String(exercise?.audio_url || '').trim();
+  const audioUrl = useMemo(() => {
+    const raw = String(exercise?.audio_url || '').trim();
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw)) return raw;
+    if (apiOrigin) {
+      return `${apiOrigin}${raw.startsWith('/') ? raw : `/${raw}`}`;
+    }
+    return raw;
+  }, [exercise, apiOrigin]);
   const displayTitle = exercise?.title || 'Bài tập';
   const isReadingLike = ['reading', 'vocabulary', 'grammar'].includes(String(exercise?.skill_type || '').toLowerCase());
   const isReading = isReadingLike;

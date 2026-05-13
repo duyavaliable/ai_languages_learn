@@ -1,12 +1,20 @@
 import express from 'express';
 import multer from 'multer';
-import path from 'path';
 import fs from 'fs';
 import { protect } from '../middleware/auth.js';
 import { gradeSpeechWithAI } from '../services/aiService.js';
+import { getUploadsAudioDir } from '../utils/storage.js';
 
 const router = express.Router();
-const upload = multer({ dest: 'uploads/audio/' });
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      const dir = getUploadsAudioDir();
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    }
+  })
+});
 
 // POST /api/speech/assess - Receive audio, transcribe, grade pronunciation/fluency
 router.post('/assess', protect, upload.single('audio'), async (req, res) => {
