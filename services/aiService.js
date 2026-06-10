@@ -1,6 +1,7 @@
 import fs from 'fs';
+import { fetchWithTimeoutRetryCircuit } from './aiWrapper.js';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL_TEXT = 'gemini-2.5-flash-lite';
+const GEMINI_MODEL_TEXT = 'gemini-3.5-flash';
 
 const getGeminiListModelsEndpoint = () =>
   `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(GEMINI_API_KEY)}`;
@@ -55,12 +56,16 @@ export async function generateGeminiText({ systemInstruction, userPrompt, userPa
     maxOutputTokens
   });
 
-  const response = await fetch(endpoint, {
+  // Use a robust wrapper with timeout, retry and a simple circuit-breaker
+  const response = await fetchWithTimeoutRetryCircuit(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(body)
+  }, {
+    timeoutMs: 20000,
+    retries: 2
   });
 
   const data = await response.json();
@@ -244,7 +249,7 @@ export const generateExercisesForCourseSkill = async ({ skill, cefrLevel, count 
     if (!parsedSet) {
       throw lastErr || new Error('AI did not return valid JSON');
     }
-    
+
     console.log('[generateExercisesForCourseSkill] Exercise parsed successfully', {
       skill: safeSkill,
       cefrLevel: safeLevel,
@@ -294,11 +299,11 @@ export const refineExerciseSet = async ({ skill, cefrLevel, feedback, currentExe
     sampleAnswer: String(currentExercise?.sampleAnswer || '').slice(0, 600),
     questions: Array.isArray(currentExercise?.questions)
       ? currentExercise.questions.slice(0, 6).map((q) => ({
-          question: String(q?.question || ''),
-          options: Array.isArray(q?.options) ? q.options.slice(0, 4).map((o) => String(o || '')) : [],
-          correctAnswer: String(q?.correctAnswer || ''),
-          explanation: String(q?.explanation || '').slice(0, 160)
-        }))
+        question: String(q?.question || ''),
+        options: Array.isArray(q?.options) ? q.options.slice(0, 4).map((o) => String(o || '')) : [],
+        correctAnswer: String(q?.correctAnswer || ''),
+        explanation: String(q?.explanation || '').slice(0, 160)
+      }))
       : []
   };
 
@@ -480,9 +485,9 @@ export const validateVocabularyColumnsWithAI = async (items = []) => {
 function calculateSimilarity(str1, str2) {
   const longer = str1.length > str2.length ? str1 : str2;
   const shorter = str1.length > str2.length ? str2 : str1;
-  
+
   if (longer.length === 0) return 1.0;
-  
+
   const editDistance = levenshteinDistance(longer, shorter);
   return (longer.length - editDistance) / longer.length;
 }
@@ -623,7 +628,7 @@ function parseJsonContent(rawContent) {
         extractedLength: extracted.length,
         extractedPreview: extracted.substring(0, 200)
       });
-      
+
       const parsedMarkdown = tryParse(extracted, `markdown-block-${i + 1}`);
       if (parsedMarkdown !== null) return parsedMarkdown;
     }
@@ -703,7 +708,7 @@ function parseExerciseSetJson(rawContent) {
 
   const questions = parsed.questions.map((item, idx) => {
     const options = Array.isArray(item?.options) ? item.options.map((opt) => normalizeGeneratedText(opt)).filter(Boolean) : [];
-    
+
     // For reading/listening exercises, enforce 2+ options
     // For writing/speaking, questions array may be empty, so skip this check
     if (options.length > 0 && options.length < 2) {
@@ -712,7 +717,7 @@ function parseExerciseSetJson(rawContent) {
 
     const correctAnswer = normalizeGeneratedText(item?.correctAnswer);
     let normalizedCorrect = correctAnswer;
-    
+
     // Only try to match correctAnswer with options if options exist
     if (options.length > 0) {
       normalizedCorrect = options.find((opt) => opt.toLowerCase() === correctAnswer.toLowerCase()) || correctAnswer;
@@ -820,10 +825,10 @@ export async function gradeSpeechWithAI({
 
     const errors = Array.isArray(parsed.errors)
       ? parsed.errors.slice(0, 10).map((item) => ({
-          word: String(item?.word || '').trim(),
-          issue: String(item?.issue || '').trim(),
-          suggestion: String(item?.suggestion || '').trim()
-        }))
+        word: String(item?.word || '').trim(),
+        issue: String(item?.issue || '').trim(),
+        suggestion: String(item?.suggestion || '').trim()
+      }))
       : [];
 
     return {
@@ -906,13 +911,179 @@ export async function gradeSpeechWithAI({
   }
 }
 
+export const rephraseSpeakingFragment = async ({
+  selectedText,
+  originalScript,
+  action = 'rewrite',
+  context = ''
+}) => {
+  const safeSelectedText = String(selectedText || '').trim();
+  const safeOriginalScript = String(originalScript || '').trim();
+  const safeContext = String(context || '').trim();
+  const safeAction = String(action || 'rewrite').trim().toLowerCase();
+
+  if (!safeSelectedText) {
+    throw new Error('selectedText is required');
+  }
+
+  const actionGuides = {
+    simplify: 'Make the phrase simpler and easier to understand.',
+    shorten: 'Make the phrase shorter while keeping the meaning.',
+    rewrite: 'Rewrite the phrase to sound natural and clear.',
+    formalize: 'Rewrite the phrase in a more formal tone.',
+    easier_to_pronounce: 'Rewrite the phrase so it is easier to pronounce while keeping the meaning.'
+  };
+
+  const guide = actionGuides[safeAction] || actionGuides.rewrite;
+
+  const aiText = await generateGeminiText({
+    systemInstruction: [
+      'You are a speaking coach for English learners.',
+      'Return strict JSON only with key alternatives.',
+      'alternatives must be an array of 3 short strings.',
+      'Each alternative must be easier to speak, easier to remember, grammatically correct, and natural sounding.',
+      'Do not add explanations.'
+    ].join(' '),
+    userPrompt: [
+      `Action: ${guide}`,
+      `Selected phrase: ${safeSelectedText}`,
+      `Original script: ${safeOriginalScript || '(not provided)'}`,
+      `Nearby context: ${safeContext || '(not provided)'}`,
+      'Return JSON like {"alternatives":["...","...","..."]} only.'
+    ].join('\n'),
+    temperature: 0.3,
+    maxOutputTokens: 256,
+    forceJsonOutput: true
+  });
+
+  const parsed = parseJsonContent(aiText);
+  const alternatives = Array.isArray(parsed?.alternatives)
+    ? parsed.alternatives.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 5)
+    : [];
+
+  if (alternatives.length === 0) {
+    throw new Error('AI did not return alternatives');
+  }
+
+  return { alternatives };
+};
+
+export const generateVstepModelScript = async ({ question }) => {
+  const safeQuestion = String(question || '').trim();
+  if (!safeQuestion) throw new Error('question is required');
+
+  const aiText = await generateGeminiText({
+    systemInstruction: [
+      'You are an experienced VSTEP Speaking instructor.',
+      'Generate a model answer for a VSTEP Speaking practice question.',
+      'Requirements:',
+      '- CEFR level B1-B2.',
+      '- Suitable for Vietnamese university students.',
+      '- Natural spoken English.',
+      '- Similar to a strong VSTEP Speaking response.',
+      '- Use simple but effective vocabulary.',
+      '- Use clear sentence structures.',
+      '- Include:',
+      '  1. Direct answer',
+      '  2. Supporting reasons',
+      '  3. Examples when appropriate',
+      '  4. Brief conclusion',
+      'The answer should sound natural when spoken aloud.',
+      'Avoid:',
+      '- Academic writing style',
+      '- Complex vocabulary',
+      '- Overly long sentences',
+      '- Native-level idioms',
+      'Length:',
+      '- Part 1: 40-80 words',
+      '- Part 2: 80-150 words',
+      '- Part 3: 120-200 words',
+      'Return JSON:',
+      '{',
+      '  "script": "...",',
+      '  "keyVocabulary": [],',
+      '  "difficulty": "B1/B2"',
+      '}'
+    ].join('\n'),
+    userPrompt: [
+      `VSTEP Speaking Question: ${safeQuestion}`,
+      'Generate the model answer now. Return JSON only.'
+    ].join('\n'),
+    temperature: 0.55,
+    maxOutputTokens: 512,
+    forceJsonOutput: true
+  });
+
+  const parsed = parseJsonContent(aiText);
+  const script = String(parsed?.script || '').trim();
+  if (!script) throw new Error('Gemini did not return a valid script');
+  return { script, keyVocabulary: parsed?.keyVocabulary || [], difficulty: parsed?.difficulty || 'B1/B2' };
+};
+
+export const generateSpeakingPracticeAssessment = async ({
+  vstepQuestion,
+  modelScript,
+  finalTranscript,
+  detectedErrors = [],
+  omissionCount = 0,
+  additionCount = 0,
+  mispronunciationCount = 0
+}) => {
+  const safeQuestion = String(vstepQuestion || '').trim();
+  const safeModelScript = String(modelScript || '').trim();
+  const safeFinalTranscript = String(finalTranscript || '').trim();
+  const safeErrors = Array.isArray(detectedErrors) ? detectedErrors.slice(0, 80) : [];
+
+  const aiText = await generateGeminiText({
+    systemInstruction: [
+      'You are a VSTEP Speaking coach.',
+      'Analyze the user\'s speaking practice.',
+      'Important:',
+      'You are NOT evaluating real pronunciation.',
+      'You only evaluate transcript differences between the user\'s speech recognition result and the model script.',
+      'Provide feedback in Vietnamese.',
+      'Return JSON:',
+      '{',
+      '  "strengths": [],',
+      '  "commonMistakes": [],',
+      '  "difficultVocabulary": [],',
+      '  "improvementSuggestions": [],',
+      '  "overallAssessment": ""',
+      '}'
+    ].join('\n'),
+    userPrompt: [
+      'Input:',
+      `- Question: ${safeQuestion || '(not provided)'}`,
+      `- Model Script: ${safeModelScript || '(not provided)'}`,
+      `- User Transcript: ${safeFinalTranscript}`,
+      `- Omission List: ${Number(omissionCount) || 0} omissions detected.`,
+      `- Addition List: ${Number(additionCount) || 0} additions detected.`,
+      `- Possible Mispronunciation List: ${Number(mispronunciationCount) || 0} mismatches detected.`,
+      `Detailed Errors: ${JSON.stringify(safeErrors)}`
+    ].join('\n'),
+    temperature: 0.3,
+    maxOutputTokens: 1024,
+    forceJsonOutput: true
+  });
+
+  const parsed = parseJsonContent(aiText);
+  return {
+    strengths: Array.isArray(parsed?.strengths) ? parsed.strengths.slice(0, 5) : [],
+    frequentlyMissedWords: Array.isArray(parsed?.commonMistakes) ? parsed.commonMistakes.slice(0, 10) : [], // mapped for UI backward compatibility
+    difficultVocabulary: Array.isArray(parsed?.difficultVocabulary) ? parsed.difficultVocabulary.slice(0, 10) : [],
+    commonMistakes: Array.isArray(parsed?.commonMistakes) ? parsed.commonMistakes.slice(0, 5) : [],
+    improvementSuggestions: Array.isArray(parsed?.improvementSuggestions) ? parsed.improvementSuggestions.slice(0, 5) : [],
+    overallAssessment: String(parsed?.overallAssessment || '').trim()
+  };
+};
+
 // New: Transcribe audio using Gemini (simple fallback to frontend transcript)
 export async function transcribeAudioWithAI(audioPath) {
   try {
     // For now, return empty string as fallback
     // In production, you would integrate with Whisper API or Google Cloud Speech-to-Text
     // Example with Whisper would require: npm install openai
-    
+
     console.log('[transcribeAudioWithAI] Audio transcription not yet integrated', {
       audioPath
     });

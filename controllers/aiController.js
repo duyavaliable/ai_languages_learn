@@ -1,4 +1,4 @@
-import { generateExplanation, generateExercises, generateExercisesForCourseSkill, refineExerciseSet, checkPronunciation } from '../services/aiService.js';
+import { generateExplanation, generateExercises, generateExercisesForCourseSkill, refineExerciseSet, checkPronunciation, rephraseSpeakingFragment, generateSpeakingPracticeAssessment, generateVstepModelScript } from '../services/aiService.js';
 import { translateText } from '../services/translationService.js';
 import { Exercise } from '../models/index.js';
 import fs from 'fs/promises';
@@ -246,5 +246,73 @@ export const evaluatePronunciation = async (req, res) => {
     res.json(evaluation);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+export const generateSpeakingScript = async (req, res) => {
+  try {
+    const { question } = req.body || {};
+    if (!String(question || '').trim()) {
+      return res.status(400).json({ message: 'question is required' });
+    }
+    const result = await generateVstepModelScript({ question });
+    return res.json(result);
+  } catch (error) {
+    console.error('[AI Controller] generateSpeakingScript failed', { message: error?.message, stack: error?.stack });
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+export const rephraseSpeakingText = async (req, res) => {
+  try {
+    const { selectedText, originalScript, action, context } = req.body || {};
+    if (!String(selectedText || '').trim()) {
+      return res.status(400).json({ message: 'selectedText is required' });
+    }
+
+    const result = await rephraseSpeakingFragment({
+      selectedText,
+      originalScript,
+      action,
+      context
+    });
+
+    return res.json(result);
+  } catch (error) {
+    console.error('[AI Controller] rephraseSpeakingText failed', { message: error?.message, stack: error?.stack });
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+export const assessSpeakingTranscript = async (req, res) => {
+  try {
+    const {
+      vstepQuestion,
+      modelScript,
+      finalTranscript,
+      detectedErrors = [],
+      omissionCount = 0,
+      additionCount = 0,
+      mispronunciationCount = 0
+    } = req.body || {};
+
+    if (!String(finalTranscript || '').trim()) {
+      return res.status(400).json({ message: 'finalTranscript is required' });
+    }
+
+    const result = await generateSpeakingPracticeAssessment({
+      vstepQuestion,
+      modelScript,
+      finalTranscript,
+      detectedErrors,
+      omissionCount,
+      additionCount,
+      mispronunciationCount
+    });
+
+    return res.json(result);
+  } catch (error) {
+    console.error('[AI Controller] assessSpeakingTranscript failed', { message: error?.message, stack: error?.stack });
+    return res.status(500).json({ message: error.message });
   }
 };
