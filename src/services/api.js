@@ -4,7 +4,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL?.trim() || '/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 30000, // AI requests (Gemini) can take 8–25s — must be > backend timeout (28s)
   headers: {}
 });
 

@@ -250,15 +250,17 @@ export const evaluatePronunciation = async (req, res) => {
 };
 
 export const generateSpeakingScript = async (req, res) => {
+  const t0 = Date.now();
   try {
-    const { question } = req.body || {};
+    const { question, part } = req.body || {};
     if (!String(question || '').trim()) {
       return res.status(400).json({ message: 'question is required' });
     }
-    const result = await generateVstepModelScript({ question });
+    const result = await generateVstepModelScript({ question, part });
+    console.log('[AI Controller] generateSpeakingScript done', { totalMs: Date.now() - t0 });
     return res.json(result);
   } catch (error) {
-    console.error('[AI Controller] generateSpeakingScript failed', { message: error?.message, stack: error?.stack });
+    console.error('[AI Controller] generateSpeakingScript failed', { message: error?.message, totalMs: Date.now() - t0 });
     return res.status(500).json({ message: error.message });
   }
 };
@@ -285,6 +287,7 @@ export const rephraseSpeakingText = async (req, res) => {
 };
 
 export const assessSpeakingTranscript = async (req, res) => {
+  const t0 = Date.now();
   try {
     const {
       vstepQuestion,
@@ -310,9 +313,10 @@ export const assessSpeakingTranscript = async (req, res) => {
       mispronunciationCount
     });
 
+    console.log('[AI Controller] assessSpeakingTranscript done', { totalMs: Date.now() - t0 });
     return res.json(result);
   } catch (error) {
-    console.error('[AI Controller] assessSpeakingTranscript failed', { message: error?.message, stack: error?.stack });
+    console.error('[AI Controller] assessSpeakingTranscript failed', { message: error?.message, totalMs: Date.now() - t0 });
     return res.status(500).json({ message: error.message });
   }
 };

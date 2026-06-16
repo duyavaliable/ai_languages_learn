@@ -17,6 +17,8 @@ function getSpeechRecognitionConstructor() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
 
+const inflightGenerateScripts = new Map();
+
 function joinParts(parts) {
   return parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 }
@@ -65,15 +67,33 @@ export default function SpeakingPracticePanel({ title, question, apiPrefix = '/a
     let cancelled = false;
     setScriptLoading(true);
     setScriptError('');
-    api.post(`${apiPrefix}/speaking/generate-script`, { question: questionText })
+
+    const requestKey = `${apiPrefix}:${questionText}`;
+    let promise = inflightGenerateScripts.get(requestKey);
+
+    if (!promise) {
+      promise = api.post(`${apiPrefix}/speaking/generate-script`, { question: questionText });
+      inflightGenerateScripts.set(requestKey, promise);
+      // Clean up the key from the map once it resolves or rejects
+      promise.finally(() => {
+        inflightGenerateScripts.delete(requestKey);
+      });
+    }
+
+    promise
       .then((res) => {
         if (!cancelled) setModelScript(String(res.data?.script || '').trim());
       })
       .catch((err) => {
         if (!cancelled) setScriptError(err?.response?.data?.message || err?.message || 'Không thể tạo script mẫu');
       })
-      .finally(() => { if (!cancelled) setScriptLoading(false); });
-    return () => { cancelled = true; };
+      .finally(() => {
+        if (!cancelled) setScriptLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [questionText, apiPrefix]);
 
   // ── Speech Recognition setup ───────────────────────────────────────────────
@@ -109,7 +129,7 @@ export default function SpeakingPracticePanel({ title, question, apiPrefix = '/a
 
     recognition.onerror = (event) => {
       setRecognitionError(event?.error ? `Lỗi nhận giọng nói: ${event.error}` : 'Nhận giọng nói thất bại');
-      setIsRecording(false);
+      setIsRecording(false); 
     };
 
     recognition.onend = () => setIsRecording(false);
@@ -195,7 +215,7 @@ export default function SpeakingPracticePanel({ title, question, apiPrefix = '/a
   // ── Rephrase request ───────────────────────────────────────────────────────
   const requestRephrase = async (action) => {
     const targetText = selectionPopup?.text || selectedMistake?.text;
-    if (!targetText) return;
+    if (!targetText || rephraseLoading) return;
     setRephraseLoading(true);
     setRephraseError('');
     setRephraseAction(action);
@@ -247,6 +267,7 @@ export default function SpeakingPracticePanel({ title, question, apiPrefix = '/a
 
   // ── Generate feedback ──────────────────────────────────────────────────────
   const generateFeedback = async () => {
+    if (assessmentLoading) return;
     setAssessmentLoading(true);
     setRecognitionError('');
     try {

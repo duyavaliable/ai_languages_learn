@@ -1,28 +1,34 @@
 import fs from 'fs';
 import { fetchWithTimeoutRetryCircuit } from './aiWrapper.js';
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL_TEXT = 'gemini-3.5-flash';
 
-const getGeminiListModelsEndpoint = () =>
-  `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+const RAW_API_KEYS = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '';
+const GEMINI_API_KEY_LIST = RAW_API_KEYS.split(',').map(k => k.trim()).filter(Boolean);
 
-const getMaskedKey = () => {
-  if (!GEMINI_API_KEY) return '(missing)';
-  if (GEMINI_API_KEY.length <= 8) return '****';
-  return `${GEMINI_API_KEY.slice(0, 4)}...${GEMINI_API_KEY.slice(-4)}`;
+
+const GEMINI_MODEL_TEXT = 'gemini-2.5-flash';
+
+const getGeminiListModelsEndpoint = (key) =>
+  `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`;
+
+const getMaskedKey = (key) => {
+  if (!key) return '(missing)';
+  if (key.length <= 8) return '****';
+  return `${key.slice(0, 4)}...${key.slice(-4)}`;
 };
 
 function ensureGeminiConfigured() {
-  if (!GEMINI_API_KEY) {
-    throw new Error('Gemini API key is missing. Set HARDCODED_GEMINI_API_KEY in services/aiService.js or GEMINI_API_KEY in .env');
+  if (GEMINI_API_KEY_LIST.length === 0) {
+    throw new Error('Gemini API keys are missing. Set GEMINI_API_KEYS (comma-separated) or GEMINI_API_KEY in .env');
   }
 }
 
 export async function generateGeminiText({ systemInstruction, userPrompt, userParts = [], temperature = 0.6, maxOutputTokens = 1024, forceJsonOutput = false }) {
   ensureGeminiConfigured();
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_TEXT}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
-  const safeEndpoint = endpoint.replace(encodeURIComponent(GEMINI_API_KEY), '***MASKED***');
+  const currentKey = GEMINI_API_KEY_LIST[0];
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_TEXT}:generateContent?key=${encodeURIComponent(currentKey)}`;
+  const safeEndpoint = endpoint.replace(encodeURIComponent(currentKey), '***MASKED***');
+
   const body = {
     contents: [
       {
@@ -37,7 +43,7 @@ export async function generateGeminiText({ systemInstruction, userPrompt, userPa
   };
 
   if (forceJsonOutput) {
-    body.generationConfig.response_mime_type = 'application/json';
+    body.generationConfig.responseMimeType = 'application/json';
   }
 
   if (systemInstruction) {
@@ -46,47 +52,44 @@ export async function generateGeminiText({ systemInstruction, userPrompt, userPa
     };
   }
 
-  console.log('[Gemini] Sending request', {
-    model: GEMINI_MODEL_TEXT,
-    endpoint: safeEndpoint,
-    forceJsonOutput,
-    hasAudioPart: userParts.some(p => p.inlineData),
-    bodySize: JSON.stringify(body).length,
-    temperature,
-    maxOutputTokens
-  });
-
-  // Use a robust wrapper with timeout, retry and a simple circuit-breaker
   const response = await fetchWithTimeoutRetryCircuit(endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   }, {
-    timeoutMs: 20000,
-    retries: 2
+    timeoutMs: 28000,
+    retries: 1,  // 1 retry on transient errors (network/timeout)
+    apiKey: currentKey
   });
 
-  const data = await response.json();
+  let data = null;
+  try {
+    data = await response.json();
+  } catch (err) {
+    if (!response.ok) {
+      throw new Error(`Gemini request failed with status ${response.status} (non-JSON body)`);
+    }
+    throw new Error('Gemini request returned invalid JSON format');
+  }
 
-  console.log('[Gemini] Raw response received', {
-    status: response.status,
-    ok: response.ok,
-    dataKeys: Object.keys(data || {}),
-    hasError: !!data?.error,
-    hasCandidates: !!data?.candidates,
-    candidatesLength: data?.candidates?.length,
-    firstCandidateKeys: data?.candidates?.[0] ? Object.keys(data.candidates[0]) : null,
-    finishReason: data?.candidates?.[0]?.finishReason || null
-  });
-
-  if (data?.candidates?.[0]?.finishReason && String(data.candidates[0].finishReason).toUpperCase().includes('MAX_TOKENS')) {
-    console.warn('[Gemini] Output may be truncated due to token limit', {
-      finishReason: data.candidates[0].finishReason,
+  const finishReason = data?.candidates?.[0]?.finishReason || null;
+  if (finishReason && String(finishReason).toUpperCase().includes('MAX_TOKENS')) {
+    console.error('[Gemini] ❌ Output TRUNCATED by token limit — JSON will be broken', {
+      finishReason,
       model: GEMINI_MODEL_TEXT,
-      maxOutputTokens
+      maxOutputTokens,
+      outputSoFarLength: (() => {
+        try {
+          return (data?.candidates || [])
+            .flatMap(c => c?.content?.parts || [])
+            .map(p => p?.text || '').join('').length;
+        } catch { return -1; }
+      })()
     });
+    throw new Error(
+      `Gemini output was cut off by token limit (maxOutputTokens=${maxOutputTokens}). ` +
+      'Increase maxOutputTokens or shorten the prompt to get complete JSON.'
+    );
   }
 
   if (!response.ok) {
@@ -95,35 +98,10 @@ export async function generateGeminiText({ systemInstruction, userPrompt, userPa
       model: GEMINI_MODEL_TEXT,
       status: response.status,
       endpoint: safeEndpoint,
-      key: getMaskedKey(),
-      error: data?.error || data,
-      fullData: JSON.stringify(data).substring(0, 500)
+      key: getMaskedKey(currentKey),
+      error: data?.error || data
     });
-
-    let availableModels = [];
-    try {
-      const listResponse = await fetch(getGeminiListModelsEndpoint(), { method: 'GET' });
-      const listData = await listResponse.json();
-      availableModels = (listData?.models || [])
-        .map((m) => String(m?.name || '').replace('models/', ''))
-        .filter(Boolean)
-        .slice(0, 25);
-
-      console.error('[Gemini] listModels result (first 25)', {
-        status: listResponse.status,
-        models: availableModels
-      });
-    } catch (listErr) {
-      console.error('[Gemini] listModels failed', {
-        message: listErr?.message || String(listErr)
-      });
-    }
-
-    const hint = availableModels.length
-      ? ` Available models (sample): ${availableModels.join(', ')}`
-      : ' Could not fetch available models automatically.';
-
-    throw new Error(`${apiMessage} [current model: ${GEMINI_MODEL_TEXT}]${hint}`);
+    throw new Error(`${apiMessage} [current model: ${GEMINI_MODEL_TEXT}]`);
   }
 
   const output = (data?.candidates || [])
@@ -135,17 +113,123 @@ export async function generateGeminiText({ systemInstruction, userPrompt, userPa
   if (!output) {
     console.error('[Gemini] Empty output extracted from response', {
       candidatesCount: data?.candidates?.length,
-      firstCandidateContent: data?.candidates?.[0]?.content,
-      firstCandidateParts: data?.candidates?.[0]?.content?.parts
+      firstCandidateContent: data?.candidates?.[0]?.content
     });
     throw new Error('Gemini returned empty content');
   }
 
-  console.log('[Gemini] Output extracted successfully', {
-    outputLength: output.length,
-    outputPreview: output.substring(0, 300),
-    outputEnd: output.length > 300 ? output.substring(output.length - 200) : ''
+
+
+  return output;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// generateGeminiJson — Dedicated JSON workflow service
+//
+// Responsibilities:
+//   - Always enables forceJsonOutput (responseMimeType: application/json)
+//   - Logs usageMetadata for token consumption diagnostics
+//   - Warns on MAX_TOKENS without hard-stopping (parseJsonContent handles recovery)
+//   - Returns raw string — caller is responsible for parseJsonContent()
+//
+// Use this for: speaking assessment, pronunciation feedback, exercise generation,
+//               script rephrasing, scoring systems — all JSON-based workflows.
+// ─────────────────────────────────────────────────────────────────────────────
+export async function generateGeminiJson({ systemInstruction, userPrompt, userParts = [], temperature = 0.6, maxOutputTokens = 1024 }) {
+  ensureGeminiConfigured();
+
+  const currentKey = GEMINI_API_KEY_LIST[0];
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_TEXT}:generateContent?key=${encodeURIComponent(currentKey)}`;
+  const safeEndpoint = endpoint.replace(encodeURIComponent(currentKey), '***MASKED***');
+
+  const body = {
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: userPrompt }, ...userParts]
+      }
+    ],
+    generationConfig: {
+      temperature,
+      maxOutputTokens,
+      responseMimeType: 'application/json'  // always JSON for this service
+    }
+  };
+
+  if (systemInstruction) {
+    body.systemInstruction = {
+      parts: [{ text: systemInstruction }]
+    };
+  }
+
+  const tStart = Date.now();
+
+  const response = await fetchWithTimeoutRetryCircuit(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }, {
+    timeoutMs: 28000,
+    retries: 1,
+    apiKey: currentKey
   });
+
+  let data = null;
+  try {
+    data = await response.json();
+  } catch (err) {
+    if (!response.ok) {
+      throw new Error(`Gemini JSON request failed with status ${response.status} (non-JSON body)`);
+    }
+    throw new Error('Gemini JSON request returned invalid response format');
+  }
+
+  if (!response.ok) {
+    const apiMessage = data?.error?.message || `Gemini request failed with status ${response.status}`;
+    console.error('[GeminiJson] Request failed', {
+      model: GEMINI_MODEL_TEXT,
+      status: response.status,
+      endpoint: safeEndpoint,
+      key: getMaskedKey(currentKey),
+      error: data?.error || data
+    });
+    throw new Error(`${apiMessage} [current model: ${GEMINI_MODEL_TEXT}]`);
+  }
+
+  // Bóc tách rawText trước khi trim — để đo chính xác độ dài gốc
+  const rawText = (data?.candidates || [])
+    .flatMap((candidate) => candidate?.content?.parts || [])
+    .map((part) => part?.text || '')
+    .join('');
+
+  const output = rawText.trim();
+  const usageMetadata = data?.usageMetadata || {};
+  const finishReason = data?.candidates?.[0]?.finishReason || null;
+  const geminiMs = Date.now() - tStart;
+
+  if (finishReason && String(finishReason).toUpperCase().includes('MAX_TOKENS')) {
+    // Cảnh báo — không throw ngay. Nếu JSON đã hoàn chỉnh thì parseJsonContent sẽ xử lý được.
+    // Nếu JSON thực sự bị cụt, parseJsonContent sẽ throw lỗi rõ ràng ở tầng trên.
+    console.warn('[GeminiJson] ⚠️ MAX_TOKENS flagged — JSON may be truncated', {
+      finishReason,
+      model: GEMINI_MODEL_TEXT,
+      sentMaxTokens: maxOutputTokens,
+      geminiMs,
+      usageMetadata,
+      rawTextLength: rawText.length,
+      trimmedLength: output.length,
+      tailBase64: Buffer.from(rawText.slice(-50)).toString('base64'),
+      tailText: rawText.slice(-50)
+    });
+  }
+
+  if (!output) {
+    console.error('[GeminiJson] Empty output from response', {
+      candidatesCount: data?.candidates?.length,
+      usageMetadata
+    });
+    throw new Error('Gemini returned empty JSON content');
+  }
 
   return output;
 }
@@ -166,7 +250,7 @@ export const generateExplanation = async (concept, language) => {
 export const generateExercises = async (difficulty, count = 5) => {
   try {
     const safeCount = Number.isFinite(Number(count)) ? Math.min(Math.max(Number(count), 1), 20) : 5;
-    const aiText = await generateGeminiText({
+    const aiText = await generateGeminiJson({
       systemInstruction: 'Return strict JSON only.',
       userPrompt: `Generate ${safeCount} exercises for difficulty ${difficulty}. Return JSON array only. Each item must include question, options, correctAnswer, explanation.`,
       temperature: 0.6,
@@ -214,13 +298,12 @@ export const generateExercisesForCourseSkill = async ({ skill, cefrLevel, count 
         ? Math.max(3, Math.min(safeCount, 6))
         : safeCount;
 
-      aiText = await generateGeminiText({
+      aiText = await generateGeminiJson({
         systemInstruction: 'Return strict JSON only. Provide keys: readingPassage, taskPrompt, sampleAnswer, questions.',
         userPrompt: `Create an exercise set. Skill: ${safeSkill}. CEFR: ${safeLevel}. Question count target: ${retryCount}. Topic: ${optionalTopic || 'general'}. Return a compact JSON object only.`,
         userParts,
         temperature: isRetry ? 0.3 : 0.5,
-        maxOutputTokens: 4096,
-        forceJsonOutput: true
+        maxOutputTokens: 4096
       });
 
       console.log('[generateExercisesForCourseSkill] AI response received', {
@@ -314,12 +397,11 @@ export const refineExerciseSet = async ({ skill, cefrLevel, feedback, currentExe
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const isRetry = attempt > 1;
-    aiText = await generateGeminiText({
+    aiText = await generateGeminiJson({
       systemInstruction: 'Return strict JSON only with keys: readingPassage, taskPrompt, sampleAnswer, questions.',
       userPrompt: `Revise exercise JSON per teacher feedback. Skill: ${safeSkill}. CEFR: ${safeLevel}. Feedback: ${safeFeedback}. Return compact JSON object only.`,
       temperature: isRetry ? 0.25 : 0.4,
-      maxOutputTokens: 4096,
-      forceJsonOutput: true
+      maxOutputTokens: 4096
     });
 
     try {
@@ -352,12 +434,11 @@ export const refineExerciseSet = async ({ skill, cefrLevel, feedback, currentExe
     let patchText = '';
     let patchObj = null;
     for (let patchAttempt = 1; patchAttempt <= 2; patchAttempt += 1) {
-      patchText = await generateGeminiText({
+      patchText = await generateGeminiJson({
         systemInstruction: 'Return a compact JSON object patch only. Allowed keys: readingPassage, taskPrompt, sampleAnswer, questions.',
         userPrompt: `Skill: ${safeSkill}. CEFR: ${safeLevel}. Feedback: ${safeFeedback}. Current questions length: ${compactCurrent.questions.length}. Return JSON patch only.`,
         temperature: 0.2,
-        maxOutputTokens: 1800,
-        forceJsonOutput: true
+        maxOutputTokens: 1800
       });
 
       try {
@@ -438,7 +519,7 @@ export const validateVocabularyColumnsWithAI = async (items = []) => {
     };
   }
 
-  const aiText = await generateGeminiText({
+  const aiText = await generateGeminiJson({
     systemInstruction: [
       'You are a strict data normalization assistant for vocabulary tables.',
       'Input rows may have column shifts between word, pronunciation, and Vietnamese meaning.',
@@ -457,8 +538,7 @@ export const validateVocabularyColumnsWithAI = async (items = []) => {
       'Return strict JSON array only. No markdown.'
     ].join('\n'),
     temperature: 0.1,
-    maxOutputTokens: 4096,
-    forceJsonOutput: true
+    maxOutputTokens: 4096
   });
 
   const parsed = parseJsonContent(aiText);
@@ -534,11 +614,8 @@ function parseJsonContent(rawContent) {
   const tryParse = (candidate, source) => {
     if (!candidate) return null;
     try {
-      const parsed = JSON.parse(candidate);
-      console.log(`[parseJsonContent] ✅ Parsed from ${source}`);
-      return parsed;
+      return JSON.parse(candidate);
     } catch (err) {
-      console.log(`[parseJsonContent] ${source} parse failed:`, err.message);
       return null;
     }
   };
@@ -593,15 +670,7 @@ function parseJsonContent(rawContent) {
     return '';
   };
 
-  console.log('[parseJsonContent] Attempting to parse', {
-    contentLength: content.length,
-    contentPreview: content.substring(0, 300),
-    contentEnd: content.length > 300 ? content.substring(content.length - 300) : '',
-    firstChar: content.charCodeAt(0),
-    lastChar: content.charCodeAt(content.length - 1),
-    isJsonStart: content.startsWith('{') || content.startsWith('['),
-    hasJsonStructure: /[\{\[][\s\S]*[\}\]]/i.test(content)
-  });
+
 
   const direct = tryParse(content, 'direct');
   if (direct !== null) return direct;
@@ -623,11 +692,7 @@ function parseJsonContent(rawContent) {
     const match = markdownMatches[i];
     if (match && match[1]) {
       const extracted = match[1].trim();
-      console.log('[parseJsonContent] Found markdown block attempt', {
-        attempt: i + 1,
-        extractedLength: extracted.length,
-        extractedPreview: extracted.substring(0, 200)
-      });
+
 
       const parsedMarkdown = tryParse(extracted, `markdown-block-${i + 1}`);
       if (parsedMarkdown !== null) return parsedMarkdown;
@@ -637,10 +702,7 @@ function parseJsonContent(rawContent) {
   // Balanced extraction handles extra text before/after JSON safely.
   const balanced = extractBalancedJson(content);
   if (balanced) {
-    console.log('[parseJsonContent] Attempting balanced JSON extraction', {
-      extractedLength: balanced.length,
-      preview: balanced.substring(0, 200)
-    });
+
     const parsedBalanced = tryParse(balanced, 'balanced-extraction');
     if (parsedBalanced !== null) return parsedBalanced;
   }
@@ -844,7 +906,7 @@ export async function gradeSpeechWithAI({
   };
 
   try {
-    const aiText = await generateGeminiText({
+    const aiText = await generateGeminiJson({
       systemInstruction,
       userPrompt,
       userParts: [
@@ -856,8 +918,7 @@ export async function gradeSpeechWithAI({
         }
       ],
       temperature: 0.3,
-      maxOutputTokens: 768,
-      forceJsonOutput: true
+      maxOutputTokens: 768
     });
 
     console.log('[gradeSpeechWithAI] Gemini response received', {
@@ -880,7 +941,7 @@ export async function gradeSpeechWithAI({
         'Return ONLY valid JSON with all required fields and numeric scores from 0 to 100.',
         'Do not include markdown or extra text.'
       ].join('\n');
-      const repairedText = await generateGeminiText({
+      const repairedText = await generateGeminiJson({
         systemInstruction,
         userPrompt: repairPrompt,
         userParts: [
@@ -892,8 +953,7 @@ export async function gradeSpeechWithAI({
           }
         ],
         temperature: 0.1,
-        maxOutputTokens: 768,
-        forceJsonOutput: true
+        maxOutputTokens: 768
       });
 
       gradeResult = parseSpeechGradeResult(repairedText);
@@ -936,7 +996,7 @@ export const rephraseSpeakingFragment = async ({
 
   const guide = actionGuides[safeAction] || actionGuides.rewrite;
 
-  const aiText = await generateGeminiText({
+  const aiText = await generateGeminiJson({
     systemInstruction: [
       'You are a speaking coach for English learners.',
       'Return strict JSON only with key alternatives.',
@@ -952,8 +1012,7 @@ export const rephraseSpeakingFragment = async ({
       'Return JSON like {"alternatives":["...","...","..."]} only.'
     ].join('\n'),
     temperature: 0.3,
-    maxOutputTokens: 256,
-    forceJsonOutput: true
+    maxOutputTokens: 256
   });
 
   const parsed = parseJsonContent(aiText);
@@ -968,14 +1027,35 @@ export const rephraseSpeakingFragment = async ({
   return { alternatives };
 };
 
-export const generateVstepModelScript = async ({ question }) => {
+export const generateVstepModelScript = async ({ question, part = 1 }) => {
   const safeQuestion = String(question || '').trim();
   if (!safeQuestion) throw new Error('question is required');
 
-  const aiText = await generateGeminiText({
+  let lengthInstruction = '';
+  let maxTokens = 512;
+
+  switch (Number(part)) {
+    case 1:
+      lengthInstruction = 'Length: 40-80 words. Give a direct, concise answer.';
+      maxTokens = 1024;
+      break;
+    case 2:
+      lengthInstruction = 'Length: 80-150 words. Discuss the options and justify your choice.';
+      maxTokens = 2048;
+      break;
+    case 3:
+      lengthInstruction = 'Length: 120-200 words. Develop the topic thoroughly with examples.';
+      maxTokens = 2048;
+      break;
+    default:
+      lengthInstruction = 'Length: 80-150 words.';
+      maxTokens = 2048;
+  }
+
+  const aiText = await generateGeminiJson({
     systemInstruction: [
       'You are an experienced VSTEP Speaking instructor.',
-      'Generate a model answer for a VSTEP Speaking practice question.',
+      `Generate a model answer for a VSTEP Speaking Part ${part} practice question.`,
       'Requirements:',
       '- CEFR level B1-B2.',
       '- Suitable for Vietnamese university students.',
@@ -994,10 +1074,7 @@ export const generateVstepModelScript = async ({ question }) => {
       '- Complex vocabulary',
       '- Overly long sentences',
       '- Native-level idioms',
-      'Length:',
-      '- Part 1: 40-80 words',
-      '- Part 2: 80-150 words',
-      '- Part 3: 120-200 words',
+      lengthInstruction,
       'Return JSON:',
       '{',
       '  "script": "...",',
@@ -1010,8 +1087,7 @@ export const generateVstepModelScript = async ({ question }) => {
       'Generate the model answer now. Return JSON only.'
     ].join('\n'),
     temperature: 0.55,
-    maxOutputTokens: 512,
-    forceJsonOutput: true
+    maxOutputTokens: maxTokens
   });
 
   const parsed = parseJsonContent(aiText);
@@ -1032,58 +1108,117 @@ export const generateSpeakingPracticeAssessment = async ({
   const safeQuestion = String(vstepQuestion || '').trim();
   const safeModelScript = String(modelScript || '').trim();
   const safeFinalTranscript = String(finalTranscript || '').trim();
-  const safeErrors = Array.isArray(detectedErrors) ? detectedErrors.slice(0, 80) : [];
 
-  const aiText = await generateGeminiText({
-    systemInstruction: [
-      'You are a VSTEP Speaking coach.',
-      'Analyze the user\'s speaking practice.',
-      'Important:',
-      'You are NOT evaluating real pronunciation.',
-      'You only evaluate transcript differences between the user\'s speech recognition result and the model script.',
-      'Provide feedback in Vietnamese.',
-      'Return JSON:',
-      '{',
-      '  "strengths": [],',
-      '  "commonMistakes": [],',
-      '  "difficultVocabulary": [],',
-      '  "improvementSuggestions": [],',
-      '  "overallAssessment": ""',
-      '}'
-    ].join('\n'),
-    userPrompt: [
-      'Input:',
-      `- Question: ${safeQuestion || '(not provided)'}`,
-      `- Model Script: ${safeModelScript || '(not provided)'}`,
-      `- User Transcript: ${safeFinalTranscript}`,
-      `- Omission List: ${Number(omissionCount) || 0} omissions detected.`,
-      `- Addition List: ${Number(additionCount) || 0} additions detected.`,
-      `- Possible Mispronunciation List: ${Number(mispronunciationCount) || 0} mismatches detected.`,
-      `Detailed Errors: ${JSON.stringify(safeErrors)}`
-    ].join('\n'),
-    temperature: 0.3,
-    maxOutputTokens: 1024,
-    forceJsonOutput: true
+  // Extract word-level error samples to keep payload compact.
+  const safeErrors = Array.isArray(detectedErrors) ? detectedErrors : [];
+  const omittedWords = safeErrors
+    .filter(e => e.type === 'omission')
+    .map(e => String(e.text || e.scriptToken || ''))
+    .filter(Boolean)
+    .slice(0, 15)
+    .join(', ');
+  const mispronWords = safeErrors
+    .filter(e => e.type === 'mispronunciationCandidate')
+    .map(e => `${String(e.scriptToken || e.text || '')}→${String(e.transcriptToken || '')}`)
+    .filter(Boolean)
+    .slice(0, 15)
+    .join(', ');
+  const addedWords = safeErrors
+    .filter(e => e.type === 'addition')
+    .map(e => String(e.text || ''))
+    .filter(Boolean)
+    .slice(0, 10)
+    .join(', ');
+
+  // ---------- System Instruction ----------
+  // NOTE: Do NOT embed a JSON schema example here — it wastes ~150 input tokens and is redundant
+  // because forceJsonOutput=true (responseMimeType=application/json) already constrains Gemini output.
+  // Keep this instruction concise to leave more of the token budget for the actual JSON output.
+  const systemInstruction = [
+    'You are an English pronunciation coach evaluating a learner who is reading a script aloud.',
+    'Evaluate delivery quality only (pronunciation, clarity, fluency, pace, intonation).',
+    'Do NOT judge content, ideas, or task achievement.',
+    'Scoring (1-10): pronunciationScore: 9-10=native-like, 7-8=minor mistakes, 5-6=understandable, 3-4=frequent errors, 1-2=hard to understand.',
+    'clarityScore: 9-10=very clear, 5-6=sometimes unclear, 1-2=very difficult.',
+    'fluencyScore: 9-10=smooth, 5-6=noticeable hesitations, 1-2=fragmented.',
+    'volumeRating: "too quiet" | "acceptable" | "too loud".',
+    'paceRating: "too slow" | "appropriate" | "too fast".',
+    'Provide short, constructive, encouraging feedback in English.',
+    'Return ONLY valid compact JSON with these exact keys: pronunciationScore, clarityScore, fluencyScore, volumeRating, paceRating, strengths, areasForImprovement, mispronouncedWords, missingWords, extraWords, overallFeedback, nextPracticeFocus.',
+    'strengths and areasForImprovement: max 3 short items each.',
+    'mispronouncedWords: max 5 items, each with word, issue, suggestion.',
+    'missingWords and extraWords: plain string arrays, max 10 items each.',
+    'overallFeedback and nextPracticeFocus: 1-2 sentences each. Be concise.'
+  ].join(' ');
+
+  // ---------- User Prompt ----------
+  const userPrompt = [
+    `Script: ${safeModelScript.substring(0, 350) || '(not provided)'}`,
+    `Transcript: ${safeFinalTranscript.substring(0, 400) || '(not provided)'}`,
+    `Context question: ${safeQuestion.substring(0, 150) || 'N/A'}`,
+    `Omissions (${Number(omissionCount) || 0}): ${omittedWords || 'none'}`,
+    `Additions (${Number(additionCount) || 0}): ${addedWords || 'none'}`,
+    `Mispron candidates (${Number(mispronunciationCount) || 0}): ${mispronWords || 'none'}`
+  ].join('\n');
+
+
+
+  const aiText = await generateGeminiJson({
+    systemInstruction,
+    userPrompt,
+    temperature: 0.25,
+    // Root cause fix: 2048 was insufficient.
+    // Gemini output for this schema (12 fields, arrays, subobjects) needs ~800-1500 tokens.
+    // Using English feedback (not Vietnamese) already saves ~30-40% output tokens.
+    // 4096 provides a safe headroom for any response length.
+    maxOutputTokens: 4096,
+    
   });
 
+
+
   const parsed = parseJsonContent(aiText);
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('AI did not return a valid JSON object for assessment');
+  }
+
+  const toStringArray = (val, limit = 5) =>
+    Array.isArray(val) ? val.map(s => String(s || '').trim()).filter(Boolean).slice(0, limit) : [];
+
+  const mispronouncedWords = Array.isArray(parsed?.mispronouncedWords)
+    ? parsed.mispronouncedWords.slice(0, 10).map(item => ({
+      word: String(item?.word || '').trim(),
+      issue: String(item?.issue || '').trim(),
+      suggestion: String(item?.suggestion || '').trim()
+    }))
+    : [];
+
   return {
-    strengths: Array.isArray(parsed?.strengths) ? parsed.strengths.slice(0, 5) : [],
-    frequentlyMissedWords: Array.isArray(parsed?.commonMistakes) ? parsed.commonMistakes.slice(0, 10) : [], // mapped for UI backward compatibility
-    difficultVocabulary: Array.isArray(parsed?.difficultVocabulary) ? parsed.difficultVocabulary.slice(0, 10) : [],
-    commonMistakes: Array.isArray(parsed?.commonMistakes) ? parsed.commonMistakes.slice(0, 5) : [],
-    improvementSuggestions: Array.isArray(parsed?.improvementSuggestions) ? parsed.improvementSuggestions.slice(0, 5) : [],
-    overallAssessment: String(parsed?.overallAssessment || '').trim()
+    // New pronunciation-coach schema
+    pronunciationScore: Number.isFinite(Number(parsed?.pronunciationScore)) ? Number(parsed.pronunciationScore) : 0,
+    clarityScore: Number.isFinite(Number(parsed?.clarityScore)) ? Number(parsed.clarityScore) : 0,
+    fluencyScore: Number.isFinite(Number(parsed?.fluencyScore)) ? Number(parsed.fluencyScore) : 0,
+    volumeRating: String(parsed?.volumeRating || '').trim(),
+    paceRating: String(parsed?.paceRating || '').trim(),
+    strengths: toStringArray(parsed?.strengths, 5),
+    areasForImprovement: toStringArray(parsed?.areasForImprovement, 5),
+    mispronouncedWords,
+    missingWords: toStringArray(parsed?.missingWords, 15),
+    extraWords: toStringArray(parsed?.extraWords, 15),
+    overallFeedback: String(parsed?.overallFeedback || '').trim(),
+    nextPracticeFocus: String(parsed?.nextPracticeFocus || '').trim(),
+    improvementSuggestions: toStringArray(parsed?.areasForImprovement, 5),
+    overallAssessment: String(parsed?.overallFeedback || '').trim(),
+    commonMistakes: mispronouncedWords.map(w => w.word).filter(Boolean).slice(0, 5),
+    frequentlyMissedWords: toStringArray(parsed?.missingWords, 10),
+    difficultVocabulary: toStringArray(parsed?.mispronouncedWords?.map?.(w => w.word), 10)
   };
 };
 
 // New: Transcribe audio using Gemini (simple fallback to frontend transcript)
 export async function transcribeAudioWithAI(audioPath) {
   try {
-    // For now, return empty string as fallback
-    // In production, you would integrate with Whisper API or Google Cloud Speech-to-Text
-    // Example with Whisper would require: npm install openai
-
     console.log('[transcribeAudioWithAI] Audio transcription not yet integrated', {
       audioPath
     });
@@ -1097,4 +1232,5 @@ export async function transcribeAudioWithAI(audioPath) {
     return '';
   }
 }
+
 
