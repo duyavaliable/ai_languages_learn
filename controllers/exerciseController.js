@@ -397,7 +397,7 @@ export const generateWritingAssist = async (req, res) => {
       systemInstruction,
       userPrompt,
       temperature: 0.3,
-      maxOutputTokens: 900,
+      maxOutputTokens: 2048, // increased from 900: thinkingBudget=0 so all tokens go to output
       forceJsonOutput: true
     });
 

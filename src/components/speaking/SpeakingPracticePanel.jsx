@@ -72,7 +72,15 @@ export default function SpeakingPracticePanel({ title, question, apiPrefix = '/a
     let promise = inflightGenerateScripts.get(requestKey);
 
     if (!promise) {
-      promise = api.post(`${apiPrefix}/speaking/generate-script`, { question: questionText });
+      let detectedPart = 1;
+      const combined = `${title || ''} ${questionText}`.toLowerCase();
+      if (/part\s*3|topic development|phát triển chủ đề/i.test(combined)) detectedPart = 3;
+      else if (/part\s*2|solution discussion|thảo luận/i.test(combined)) detectedPart = 2;
+
+      promise = api.post(`${apiPrefix}/speaking/generate-script`, { 
+        question: questionText,
+        part: detectedPart
+      });
       inflightGenerateScripts.set(requestKey, promise);
       // Clean up the key from the map once it resolves or rejects
       promise.finally(() => {

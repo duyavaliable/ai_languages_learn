@@ -2,7 +2,7 @@ import fs from 'fs';
 import { fetchWithTimeoutRetryCircuit } from './aiWrapper.js';
 
 const RAW_API_KEYS = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '';
-const GEMINI_API_KEY_LIST = RAW_API_KEYS.split(',').map(k => k.trim()).filter(Boolean);
+const GEMINI_API_KEY = RAW_API_KEYS.split(',')[0]?.trim() || '';
 
 
 const GEMINI_MODEL_TEXT = 'gemini-2.5-flash';
@@ -17,15 +17,15 @@ const getMaskedKey = (key) => {
 };
 
 function ensureGeminiConfigured() {
-  if (GEMINI_API_KEY_LIST.length === 0) {
-    throw new Error('Gemini API keys are missing. Set GEMINI_API_KEYS (comma-separated) or GEMINI_API_KEY in .env');
+  if (!GEMINI_API_KEY) {
+    throw new Error('Gemini API key is missing. Set GEMINI_API_KEY or GEMINI_API_KEYS in .env');
   }
 }
 
 export async function generateGeminiText({ systemInstruction, userPrompt, userParts = [], temperature = 0.6, maxOutputTokens = 1024, forceJsonOutput = false }) {
   ensureGeminiConfigured();
 
-  const currentKey = GEMINI_API_KEY_LIST[0];
+  const currentKey = GEMINI_API_KEY;
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_TEXT}:generateContent?key=${encodeURIComponent(currentKey)}`;
   const safeEndpoint = endpoint.replace(encodeURIComponent(currentKey), '***MASKED***');
 
@@ -38,7 +38,8 @@ export async function generateGeminiText({ systemInstruction, userPrompt, userPa
     ],
     generationConfig: {
       temperature,
-      maxOutputTokens
+      maxOutputTokens,
+      thinkingConfig: { thinkingBudget: 0 } // Disable thinking tokens — avoids token budget drain and latency spike
     }
   };
 
@@ -59,7 +60,8 @@ export async function generateGeminiText({ systemInstruction, userPrompt, userPa
   }, {
     timeoutMs: 28000,
     retries: 1,  // 1 retry on transient errors (network/timeout)
-    apiKey: currentKey
+    apiKey: currentKey,
+    label: 'generateGeminiText'
   });
 
   let data = null;
@@ -135,10 +137,10 @@ export async function generateGeminiText({ systemInstruction, userPrompt, userPa
 // Use this for: speaking assessment, pronunciation feedback, exercise generation,
 //               script rephrasing, scoring systems — all JSON-based workflows.
 // ─────────────────────────────────────────────────────────────────────────────
-export async function generateGeminiJson({ systemInstruction, userPrompt, userParts = [], temperature = 0.6, maxOutputTokens = 1024 }) {
+export async function generateGeminiJson({ systemInstruction, userPrompt, userParts = [], temperature = 0.6, maxOutputTokens = 1024, timeoutMs = 28000 }) {
   ensureGeminiConfigured();
 
-  const currentKey = GEMINI_API_KEY_LIST[0];
+  const currentKey = GEMINI_API_KEY;
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_TEXT}:generateContent?key=${encodeURIComponent(currentKey)}`;
   const safeEndpoint = endpoint.replace(encodeURIComponent(currentKey), '***MASKED***');
 
@@ -152,7 +154,8 @@ export async function generateGeminiJson({ systemInstruction, userPrompt, userPa
     generationConfig: {
       temperature,
       maxOutputTokens,
-      responseMimeType: 'application/json'  // always JSON for this service
+      responseMimeType: 'application/json',  // always JSON for this service
+      thinkingConfig: { thinkingBudget: 0 } // Disable thinking tokens — avoids token budget drain and latency spike
     }
   };
 
@@ -169,9 +172,10 @@ export async function generateGeminiJson({ systemInstruction, userPrompt, userPa
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   }, {
-    timeoutMs: 28000,
+    timeoutMs, // caller-supplied (default 28000; audio calls may pass 45000)
     retries: 1,
-    apiKey: currentKey
+    apiKey: currentKey,
+    label: 'generateGeminiJson'
   });
 
   let data = null;
@@ -234,256 +238,7 @@ export async function generateGeminiJson({ systemInstruction, userPrompt, userPa
   return output;
 }
 
-export const generateExplanation = async (concept, language) => {
-  try {
-    return await generateGeminiText({
-      systemInstruction: `You are a language learning assistant. Explain concepts clearly in ${language}.`,
-      userPrompt: `Explain this concept: ${concept}`,
-      temperature: 0.7,
-      maxOutputTokens: 700
-    });
-  } catch (error) {
-    throw new Error('Failed to generate explanation: ' + error.message);
-  }
-};
 
-export const generateExercises = async (difficulty, count = 5) => {
-  try {
-    const safeCount = Number.isFinite(Number(count)) ? Math.min(Math.max(Number(count), 1), 20) : 5;
-    const aiText = await generateGeminiJson({
-      systemInstruction: 'Return strict JSON only.',
-      userPrompt: `Generate ${safeCount} exercises for difficulty ${difficulty}. Return JSON array only. Each item must include question, options, correctAnswer, explanation.`,
-      temperature: 0.6,
-      maxOutputTokens: 1400
-    });
-
-    return parseExerciseJson(aiText);
-  } catch (error) {
-    throw new Error('Failed to generate exercises: ' + error.message);
-  }
-};
-
-export const generateExercisesForCourseSkill = async ({ skill, cefrLevel, count = 5, topic, audioInput }) => {
-  const safeSkill = String(skill || '').trim().toLowerCase();
-  const safeLevel = String(cefrLevel || '').trim().toUpperCase();
-  const safeCount = Number.isFinite(Number(count)) ? Math.min(Math.max(Number(count), 1), 20) : 5;
-  const optionalTopic = topic ? String(topic).trim() : '';
-
-  const skillGuide = {
-    reading: 'For reading: produce readingPassage and multiple-choice comprehension questions.',
-    listening: 'For listening: use provided audio context, set taskPrompt for listening instructions, and create multiple-choice listening questions.',
-    writing: 'For writing: create taskPrompt only (writing prompt), questions should be [].',
-    speaking: 'For speaking: create taskPrompt only (speaking prompt), questions should be [].'
-  };
-
-  const userParts = [];
-  if (safeSkill === 'listening' && audioInput?.base64 && audioInput?.mimeType) {
-    userParts.push({
-      inlineData: {
-        mimeType: audioInput.mimeType,
-        data: audioInput.base64
-      }
-    });
-  }
-
-  let aiText = '';
-  try {
-    const maxAttempts = 3;
-    let parsedSet = null;
-    let lastErr = null;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const isRetry = attempt > 1;
-      const retryCount = isRetry && (safeSkill === 'reading' || safeSkill === 'listening')
-        ? Math.max(3, Math.min(safeCount, 6))
-        : safeCount;
-
-      aiText = await generateGeminiJson({
-        systemInstruction: 'Return strict JSON only. Provide keys: readingPassage, taskPrompt, sampleAnswer, questions.',
-        userPrompt: `Create an exercise set. Skill: ${safeSkill}. CEFR: ${safeLevel}. Question count target: ${retryCount}. Topic: ${optionalTopic || 'general'}. Return a compact JSON object only.`,
-        userParts,
-        temperature: isRetry ? 0.3 : 0.5,
-        maxOutputTokens: 4096
-      });
-
-      console.log('[generateExercisesForCourseSkill] AI response received', {
-        attempt,
-        skill: safeSkill,
-        cefrLevel: safeLevel,
-        aiTextLength: aiText?.length,
-        aiTextPreview: aiText?.substring(0, 200)
-      });
-
-      try {
-        parsedSet = parseExerciseSetJson(aiText);
-        break;
-      } catch (err) {
-        lastErr = err;
-        console.warn('[generateExercisesForCourseSkill] Parse failed, will retry if attempts remain', {
-          attempt,
-          maxAttempts,
-          skill: safeSkill,
-          cefrLevel: safeLevel,
-          error: err?.message
-        });
-      }
-    }
-
-    if (!parsedSet) {
-      throw lastErr || new Error('AI did not return valid JSON');
-    }
-
-    console.log('[generateExercisesForCourseSkill] Exercise parsed successfully', {
-      skill: safeSkill,
-      cefrLevel: safeLevel,
-      questionCount: parsedSet.questions?.length || 0
-    });
-
-    return {
-      skill: safeSkill,
-      cefrLevel: safeLevel,
-      topic: optionalTopic,
-      readingPassage: parsedSet.readingPassage,
-      taskPrompt: parsedSet.taskPrompt,
-      sampleAnswer: parsedSet.sampleAnswer,
-      questions: parsedSet.questions
-    };
-  } catch (error) {
-    console.error('[generateExercisesForCourseSkill] Exercise generation failed', {
-      skill: safeSkill,
-      cefrLevel: safeLevel,
-      count: safeCount,
-      topic: optionalTopic,
-      hasAudioInput: !!audioInput,
-      aiTextLength: aiText.length,
-      aiTextPreview: aiText ? aiText.substring(0, 400) : '(empty)',
-      errorMessage: error?.message,
-      errorStack: error?.stack
-    });
-    throw new Error('Failed to generate course exercises: ' + error.message);
-  }
-};
-
-export const refineExerciseSet = async ({ skill, cefrLevel, feedback, currentExercise }) => {
-  const safeSkill = String(skill || '').trim().toLowerCase();
-  const safeLevel = String(cefrLevel || '').trim().toUpperCase();
-  const safeFeedback = String(feedback || '').trim();
-
-  if (!safeFeedback) {
-    throw new Error('Feedback is required to refine exercise');
-  }
-  const compactCurrent = {
-    title: String(currentExercise?.title || '').trim(),
-    skill: safeSkill,
-    cefrLevel: safeLevel,
-    topic: String(currentExercise?.topic || '').trim(),
-    readingPassage: String(currentExercise?.readingPassage || '').slice(0, 1600),
-    taskPrompt: String(currentExercise?.taskPrompt || '').slice(0, 600),
-    sampleAnswer: String(currentExercise?.sampleAnswer || '').slice(0, 600),
-    questions: Array.isArray(currentExercise?.questions)
-      ? currentExercise.questions.slice(0, 6).map((q) => ({
-        question: String(q?.question || ''),
-        options: Array.isArray(q?.options) ? q.options.slice(0, 4).map((o) => String(o || '')) : [],
-        correctAnswer: String(q?.correctAnswer || ''),
-        explanation: String(q?.explanation || '').slice(0, 160)
-      }))
-      : []
-  };
-
-  let aiText = '';
-  let parsedSet = null;
-  let lastErr = null;
-  const maxAttempts = 3;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const isRetry = attempt > 1;
-    aiText = await generateGeminiJson({
-      systemInstruction: 'Return strict JSON only with keys: readingPassage, taskPrompt, sampleAnswer, questions.',
-      userPrompt: `Revise exercise JSON per teacher feedback. Skill: ${safeSkill}. CEFR: ${safeLevel}. Feedback: ${safeFeedback}. Return compact JSON object only.`,
-      temperature: isRetry ? 0.25 : 0.4,
-      maxOutputTokens: 4096
-    });
-
-    try {
-      parsedSet = parseExerciseSetJson(aiText);
-      break;
-    } catch (err) {
-      lastErr = err;
-      console.warn('[refineExerciseSet] Parse failed, retrying if possible', {
-        attempt,
-        maxAttempts,
-        skill: safeSkill,
-        cefrLevel: safeLevel,
-        aiTextLength: aiText.length,
-        error: err?.message
-      });
-    }
-  }
-
-  if (!parsedSet) {
-    console.warn('[refineExerciseSet] Main refine failed after retries, trying compact patch fallback', {
-      skill: safeSkill,
-      cefrLevel: safeLevel,
-      feedbackPreview: safeFeedback.substring(0, 200),
-      aiTextLength: aiText.length,
-      aiTextPreview: aiText ? aiText.substring(0, 400) : '(empty)',
-      error: lastErr?.message
-    });
-
-    // Fallback: ask AI for a compact patch JSON (changed fields only), then merge.
-    let patchText = '';
-    let patchObj = null;
-    for (let patchAttempt = 1; patchAttempt <= 2; patchAttempt += 1) {
-      patchText = await generateGeminiJson({
-        systemInstruction: 'Return a compact JSON object patch only. Allowed keys: readingPassage, taskPrompt, sampleAnswer, questions.',
-        userPrompt: `Skill: ${safeSkill}. CEFR: ${safeLevel}. Feedback: ${safeFeedback}. Current questions length: ${compactCurrent.questions.length}. Return JSON patch only.`,
-        temperature: 0.2,
-        maxOutputTokens: 1800
-      });
-
-      try {
-        patchObj = parseJsonContent(patchText);
-        if (patchObj && typeof patchObj === 'object' && !Array.isArray(patchObj)) {
-          break;
-        }
-      } catch (patchErr) {
-        console.warn('[refineExerciseSet] Compact patch parse failed', {
-          patchAttempt,
-          error: patchErr?.message,
-          patchTextLength: patchText.length,
-          patchTextPreview: patchText.substring(0, 300)
-        });
-      }
-    }
-
-    if (!patchObj || typeof patchObj !== 'object' || Array.isArray(patchObj)) {
-      console.error('[refineExerciseSet] Compact patch fallback also failed', {
-        skill: safeSkill,
-        cefrLevel: safeLevel,
-        patchTextLength: patchText.length,
-        patchTextPreview: patchText ? patchText.substring(0, 400) : '(empty)',
-        lastError: lastErr?.message
-      });
-      throw lastErr || new Error('AI did not return valid JSON');
-    }
-
-    const merged = {
-      readingPassage: patchObj.readingPassage ?? compactCurrent.readingPassage,
-      taskPrompt: patchObj.taskPrompt ?? compactCurrent.taskPrompt,
-      sampleAnswer: patchObj.sampleAnswer ?? compactCurrent.sampleAnswer,
-      questions: Array.isArray(patchObj.questions) ? patchObj.questions : compactCurrent.questions
-    };
-
-    parsedSet = parseExerciseSetJson(JSON.stringify(merged));
-  }
-
-  return {
-    readingPassage: parsedSet.readingPassage,
-    taskPrompt: parsedSet.taskPrompt,
-    sampleAnswer: parsedSet.sampleAnswer,
-    questions: parsedSet.questions
-  };
-};
 
 export const checkPronunciation = async (audioData, text, language) => {
   try {
@@ -582,31 +337,7 @@ function normalizeGeneratedText(value) {
     .trim();
 }
 
-function parseExerciseJson(rawContent) {
-  const content = String(rawContent || '').trim();
 
-  let parsed;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    const match = content.match(/```json\s*([\s\S]*?)\s*```/i) || content.match(/```\s*([\s\S]*?)\s*```/i);
-    if (!match) {
-      throw new Error('AI did not return valid JSON');
-    }
-    parsed = JSON.parse(match[1]);
-  }
-
-  if (!Array.isArray(parsed)) {
-    throw new Error('AI response must be a JSON array');
-  }
-
-  return parsed.map((item) => ({
-    question: normalizeGeneratedText(item?.question),
-    options: Array.isArray(item?.options) ? item.options.map((opt) => normalizeGeneratedText(opt)).filter(Boolean) : [],
-    correctAnswer: normalizeGeneratedText(item?.correctAnswer),
-    explanation: normalizeGeneratedText(item?.explanation)
-  }));
-}
 
 function parseJsonContent(rawContent) {
   const content = String(rawContent || '').trim();
@@ -722,84 +453,7 @@ function parseJsonContent(rawContent) {
   throw new Error('AI did not return valid JSON');
 }
 
-function parseExerciseSetJson(rawContent) {
-  let parsed;
-  try {
-    parsed = parseJsonContent(rawContent);
-  } catch (parseErr) {
-    console.error('[parseExerciseSetJson] parseJsonContent failed', {
-      error: parseErr?.message,
-      rawContentLength: String(rawContent || '').length
-    });
-    throw parseErr;
-  }
 
-  // Normalize common wrapper shapes from LLM outputs.
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    if (parsed.data && typeof parsed.data === 'object') parsed = parsed.data;
-    if (parsed.result && typeof parsed.result === 'object') parsed = parsed.result;
-    if (parsed.exercise && typeof parsed.exercise === 'object') parsed = parsed.exercise;
-  }
-
-  // If model returns only questions array, coerce to expected object shape.
-  if (Array.isArray(parsed)) {
-    parsed = {
-      readingPassage: '',
-      taskPrompt: '',
-      sampleAnswer: '',
-      questions: parsed
-    };
-  }
-
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    console.error('[parseExerciseSetJson] Parsed JSON is not an object', {
-      type: Array.isArray(parsed) ? 'array' : typeof parsed,
-      keys: parsed && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 10) : 'N/A',
-      sample: JSON.stringify(parsed).substring(0, 200)
-    });
-    throw new Error('AI response must be a JSON object for exercise set');
-  }
-
-  if (!Array.isArray(parsed.questions)) {
-    console.error('[parseExerciseSetJson] questions field is not an array', {
-      questionsType: typeof parsed.questions,
-      questionsValue: String(parsed.questions).substring(0, 200)
-    });
-    throw new Error('AI response must include questions array');
-  }
-
-  const questions = parsed.questions.map((item, idx) => {
-    const options = Array.isArray(item?.options) ? item.options.map((opt) => normalizeGeneratedText(opt)).filter(Boolean) : [];
-
-    // For reading/listening exercises, enforce 2+ options
-    // For writing/speaking, questions array may be empty, so skip this check
-    if (options.length > 0 && options.length < 2) {
-      throw new Error(`Question ${idx + 1} must have at least 2 options (has ${options.length})`);
-    }
-
-    const correctAnswer = normalizeGeneratedText(item?.correctAnswer);
-    let normalizedCorrect = correctAnswer;
-
-    // Only try to match correctAnswer with options if options exist
-    if (options.length > 0) {
-      normalizedCorrect = options.find((opt) => opt.toLowerCase() === correctAnswer.toLowerCase()) || correctAnswer;
-    }
-
-    return {
-      question: normalizeGeneratedText(item?.question),
-      options,
-      correctAnswer: normalizedCorrect,
-      explanation: normalizeGeneratedText(item?.explanation)
-    };
-  });
-
-  return {
-    readingPassage: normalizeGeneratedText(parsed.readingPassage),
-    taskPrompt: normalizeGeneratedText(parsed.taskPrompt),
-    sampleAnswer: normalizeGeneratedText(parsed.sampleAnswer),
-    questions
-  };
-}
 
 function levenshteinDistance(str1, str2) {
   const matrix = [];
@@ -918,7 +572,8 @@ export async function gradeSpeechWithAI({
         }
       ],
       temperature: 0.3,
-      maxOutputTokens: 768
+      maxOutputTokens: 4096, // increased: thinkingBudget=0 so all tokens go to output
+      timeoutMs: 45000 // audio multimodal needs extra decode + inference time
     });
 
     console.log('[gradeSpeechWithAI] Gemini response received', {
@@ -953,7 +608,8 @@ export async function gradeSpeechWithAI({
           }
         ],
         temperature: 0.1,
-        maxOutputTokens: 768
+        maxOutputTokens: 4096, // increased: thinkingBudget=0 so all tokens go to output
+        timeoutMs: 45000 // audio multimodal needs extra decode + inference time
       });
 
       gradeResult = parseSpeechGradeResult(repairedText);
@@ -998,21 +654,18 @@ export const rephraseSpeakingFragment = async ({
 
   const aiText = await generateGeminiJson({
     systemInstruction: [
-      'You are a speaking coach for English learners.',
-      'Return strict JSON only with key alternatives.',
-      'alternatives must be an array of 3 short strings.',
-      'Each alternative must be easier to speak, easier to remember, grammatically correct, and natural sounding.',
-      'Do not add explanations.'
+      'You are a speaking coach.',
+      'Return JSON only: {"alternatives":["...","...","..."]}.',
+      'Provide 3 natural, grammatically correct alternatives.'
     ].join(' '),
     userPrompt: [
       `Action: ${guide}`,
       `Selected phrase: ${safeSelectedText}`,
       `Original script: ${safeOriginalScript || '(not provided)'}`,
-      `Nearby context: ${safeContext || '(not provided)'}`,
-      'Return JSON like {"alternatives":["...","...","..."]} only.'
+      `Context: ${safeContext || '(not provided)'}`
     ].join('\n'),
     temperature: 0.3,
-    maxOutputTokens: 256
+    maxOutputTokens: 1024 // increased from 256: thinkingBudget=0 so no thinking token drain
   });
 
   const parsed = parseJsonContent(aiText);
@@ -1027,65 +680,207 @@ export const rephraseSpeakingFragment = async ({
   return { alternatives };
 };
 
-export const generateVstepModelScript = async ({ question, part = 1 }) => {
+export const rephraseSpeakingFragmentV2 = async ({
+  selectedText,
+  originalScript
+}) => {
+  const safeSelectedText = String(selectedText || '').trim();
+  const safeOriginalScript = String(originalScript || '').trim();
+
+  // 1. Mandatory Sanitizer / Validation Layer
+  const defaultResponse = {
+    simplify: [],
+    shorten: [],
+    rewrite: [],
+    formalize: [],
+    easier_to_pronounce: []
+  };
+
+  if (!safeSelectedText) {
+    return defaultResponse;
+  }
+
+  try {
+    // 2. Call Gemini API safely
+    const aiText = await generateGeminiJson({
+      systemInstruction: [
+        'You are a speaking coach.',
+        'Return ONLY JSON: {"simplify":[],"shorten":[],"rewrite":[],"formalize":[],"easier_to_pronounce":[]}.',
+        'Provide 3 natural alternatives per key.'
+      ].join(' '),
+      userPrompt: [
+        `Phrase: "${safeSelectedText}"`,
+        `Context: "${safeOriginalScript || '(not provided)'}"`
+      ].join('\n'),
+      temperature: 0.3,
+      maxOutputTokens: 2048 // increased: thinkingBudget=0 so all tokens go to output
+    });
+
+    // 4. Try-catch protection for parsing
+    let parsed;
+    try {
+      parsed = parseJsonContent(aiText);
+    } catch (parseError) {
+      console.error('[RephraseV2] JSON Parse Error:', parseError.message);
+      return defaultResponse; // Never throw raw JSON crash to controller
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      console.error('[RephraseV2] AI returned non-object JSON');
+      return defaultResponse;
+    }
+
+    // 5. JSON Sanitizer - Extract keys safely and auto-fill empty arrays if missing
+    const extractArray = (key) => {
+      if (Array.isArray(parsed[key])) {
+        return parsed[key].map(item => String(item || '').trim()).filter(Boolean).slice(0, 3);
+      }
+      return [];
+    };
+
+    return {
+      simplify: extractArray('simplify'),
+      shorten: extractArray('shorten'),
+      rewrite: extractArray('rewrite'),
+      formalize: extractArray('formalize'),
+      easier_to_pronounce: extractArray('easier_to_pronounce')
+    };
+
+  } catch (error) {
+    // 6. Timeout / Network / 429 Safety
+    console.error('[RephraseV2] Gemini API Request Failed:', error.message);
+    return defaultResponse; // Fail gracefully, return empty arrays
+  }
+};
+
+const PART_INSTRUCTIONS = {
+  1: [
+    'You are a VSTEP Speaking examiner writing a model answer for Part 1.',
+    'PART 1 is Social Interaction — a natural conversational exchange.',
+    'The candidate responds personally and directly. No formal structure required.',
+    'TARGET: CEFR B1-B2. Vietnamese university student.',
+    'Similar to a strong VSTEP Speaking Part 1 response.',
+    'RESPONSE FLOW (flexible — not rigid sections):',
+    '→ Respond directly to the question (personal, first-person)',
+    '→ Give a brief reason or feeling',
+    '→ Add a small personal detail or example ONLY IF it flows naturally',
+    'TONE RULES:',
+    '- Sound like real spoken conversation, NOT an essay or a speech',
+    '- Use first-person: "I", "my", "me"',
+    '- Natural spoken openers are welcome: "Well,", "Actually,", "Yeah,"',
+    '- Natural spoken connectors: "So,", "Because,", "I mean,", "You know,"',
+    '- Do NOT open with "In my opinion," or "I think that..." as a formal thesis',
+    '- Do NOT write a formal conclusion ("In conclusion," / "To sum up,")',
+    '- Do NOT use academic linking words ("Furthermore,", "Therefore,", "Hence,")',
+    '- Do NOT over-explain — keep it casual and genuine',
+    'LENGTH: 40–80 words total. Do not exceed.',
+    'Return JSON: {"script": "..."}'
+  ].join('\n'),
+  2: [
+    'You are a VSTEP Speaking examiner writing a model answer for Part 2.',
+    'PART 2 is Solution Discussion — the candidate selects ONE option from 2–3 given choices and justifies it, while briefly acknowledging the other options.',
+    'TARGET: CEFR B1-B2. Vietnamese university student.',
+    'Similar to a strong VSTEP Speaking Part 2 response.',
+    'YOU MUST FOLLOW THIS EXACT 4-PART STRUCTURE:',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '[SECTION 1 — Opening] (1–2 sentences)',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '→ Naturally restate the situation and your chosen option.',
+    '→ Pattern: "Well, thinking about [situation], I think the best option would be [your choice]."',
+    '→ Tone: Natural, as if thinking aloud, not reading a script.',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '[SECTION 2 — Main Reasons] (60–80 words)',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '→ Give 2 OR 3 reasons for your choice.',
+    '→ EACH reason MUST follow this micro-pattern:',
+    '   (a) State the reason clearly',
+    '   (b) Explain WHY it matters',
+    '   (c) Add a brief supporting detail or concrete example',
+    '→ Connectors to use: "First of all,", "Also,", "Another reason is that,"',
+    '→ Do NOT just list reasons without explanation.',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '[SECTION 3 — Discuss Other Options] (25–40 words)',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '→ Briefly mention the other option(s).',
+    '→ ACKNOWLEDGE their advantage(s) first.',
+    '→ Then explain WHY they are less suitable for THIS specific situation.',
+    '→ Do NOT just say they are bad or only list negatives. Be balanced.',
+    '→ Pattern: "[Other option] does have [advantage], but in this case, [reason it is less ideal]..."',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '[SECTION 4 — Conclusion] (1–2 sentences)',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '→ Reaffirm your choice with a brief summary of your core reason.',
+    '→ Pattern: "So overall, I think [your choice] is the best option here because [core reason]."',
+    'TOTAL LENGTH: 100–160 words. Keep each section concise.',
+    'TONE: Think-aloud spoken delivery — deliberate but natural. NOT a formal essay.',
+    'Do NOT use bullet points or numbered lists in the final script.',
+    'Return JSON: {"script": "..."}'
+  ].join('\n'),
+  3: [
+    'You are a VSTEP Speaking examiner writing a model answer for Part 3.',
+    'PART 3 is Topic Development — an extended spoken monologue. The candidate discusses a topic, expresses a position, or analyzes a concept. This is NOT about choosing between given options (that is Part 2).',
+    'TARGET: CEFR B1-B2. Vietnamese university student.',
+    'Similar to a strong VSTEP Speaking Part 3 response.',
+    'FOLLOW THIS RESPONSE STRUCTURE:',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '[Opening + Position] (2–3 sentences)',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '→ State your general position or framing of the topic.',
+    '→ Indicate what you will discuss (signpost).',
+    '→ Pattern: "I think [topic] is [your position]. There are several reasons/aspects I\'d like to mention."',
+    '→ Do NOT use "In this essay" or formal academic openers.',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '[Idea 1 — with Explanation + Example] (35–50 words)',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '→ State your first main idea clearly.',
+    '→ Explain the idea (why it is important, how it works).',
+    '→ Support with a brief, concrete, real-world example.',
+    '→ Signpost: "First of all,", "One important point is,"',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '[Idea 2 — with Explanation + Example] (35–50 words)',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '→ State your second main idea.',
+    '→ Explain and support with a concrete example.',
+    '→ Signpost: "Moreover,", "Another key aspect is,"',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '[Counterargument — OPTIONAL] (15–25 words)',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '→ Include ONLY if it strengthens your overall argument.',
+    '→ Briefly acknowledge an opposing view, then refute or qualify it.',
+    '→ Pattern: "Of course, some might argue that..., but I believe..."',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '[Conclusion] (1–2 sentences)',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '→ Summarize your overall position.',
+    '→ Pattern: "In conclusion, I believe...", "Overall, I think..."',
+    'TOTAL LENGTH: 150–200 words.',
+    'TONE: Organized but natural spoken monologue. Clear signposting, but NOT robotic.',
+    'Do NOT use bullet points or numbered lists in the final script.',
+    'Do NOT use overly academic vocabulary (avoid: "henceforth", "aforementioned", "it is evident that").',
+    'Return JSON: {"script": "..."}'
+  ].join('\n')
+};
+
+function detectVstepPart(part, questionText) {
+  const num = Number(part);
+  if (num === 1 || num === 2 || num === 3) return num;
+  const q = String(questionText || '').toLowerCase();
+  if (/part\s*1|social interaction|tương tác xã hội/i.test(q)) return 1;
+  if (/part\s*3|topic development|phát triển chủ đề/i.test(q)) return 3;
+  if (/part\s*2|solution discussion|thảo luận/i.test(q)) return 2;
+  return 1;
+}
+
+export const generateVstepModelScript = async ({ question, part }) => {
   const safeQuestion = String(question || '').trim();
   if (!safeQuestion) throw new Error('question is required');
 
-  let lengthInstruction = '';
-  let maxTokens = 512;
-
-  switch (Number(part)) {
-    case 1:
-      lengthInstruction = 'Length: 40-80 words. Give a direct, concise answer.';
-      maxTokens = 1024;
-      break;
-    case 2:
-      lengthInstruction = 'Length: 80-150 words. Discuss the options and justify your choice.';
-      maxTokens = 2048;
-      break;
-    case 3:
-      lengthInstruction = 'Length: 120-200 words. Develop the topic thoroughly with examples.';
-      maxTokens = 2048;
-      break;
-    default:
-      lengthInstruction = 'Length: 80-150 words.';
-      maxTokens = 2048;
-  }
+  const partNum = detectVstepPart(part, question);
+  const maxTokens = partNum === 1 ? 1024 : 2048;
 
   const aiText = await generateGeminiJson({
-    systemInstruction: [
-      'You are an experienced VSTEP Speaking instructor.',
-      `Generate a model answer for a VSTEP Speaking Part ${part} practice question.`,
-      'Requirements:',
-      '- CEFR level B1-B2.',
-      '- Suitable for Vietnamese university students.',
-      '- Natural spoken English.',
-      '- Similar to a strong VSTEP Speaking response.',
-      '- Use simple but effective vocabulary.',
-      '- Use clear sentence structures.',
-      '- Include:',
-      '  1. Direct answer',
-      '  2. Supporting reasons',
-      '  3. Examples when appropriate',
-      '  4. Brief conclusion',
-      'The answer should sound natural when spoken aloud.',
-      'Avoid:',
-      '- Academic writing style',
-      '- Complex vocabulary',
-      '- Overly long sentences',
-      '- Native-level idioms',
-      lengthInstruction,
-      'Return JSON:',
-      '{',
-      '  "script": "...",',
-      '  "keyVocabulary": [],',
-      '  "difficulty": "B1/B2"',
-      '}'
-    ].join('\n'),
-    userPrompt: [
-      `VSTEP Speaking Question: ${safeQuestion}`,
-      'Generate the model answer now. Return JSON only.'
-    ].join('\n'),
+    systemInstruction: PART_INSTRUCTIONS[partNum],
+    userPrompt: `VSTEP Speaking Question: ${safeQuestion}\nGenerate the model answer now. Return JSON only.`,
     temperature: 0.55,
     maxOutputTokens: maxTokens
   });
@@ -1093,7 +888,7 @@ export const generateVstepModelScript = async ({ question, part = 1 }) => {
   const parsed = parseJsonContent(aiText);
   const script = String(parsed?.script || '').trim();
   if (!script) throw new Error('Gemini did not return a valid script');
-  return { script, keyVocabulary: parsed?.keyVocabulary || [], difficulty: parsed?.difficulty || 'B1/B2' };
+  return { script };
 };
 
 export const generateSpeakingPracticeAssessment = async ({
@@ -1135,20 +930,11 @@ export const generateSpeakingPracticeAssessment = async ({
   // because forceJsonOutput=true (responseMimeType=application/json) already constrains Gemini output.
   // Keep this instruction concise to leave more of the token budget for the actual JSON output.
   const systemInstruction = [
-    'You are an English pronunciation coach evaluating a learner who is reading a script aloud.',
-    'Evaluate delivery quality only (pronunciation, clarity, fluency, pace, intonation).',
-    'Do NOT judge content, ideas, or task achievement.',
-    'Scoring (1-10): pronunciationScore: 9-10=native-like, 7-8=minor mistakes, 5-6=understandable, 3-4=frequent errors, 1-2=hard to understand.',
-    'clarityScore: 9-10=very clear, 5-6=sometimes unclear, 1-2=very difficult.',
-    'fluencyScore: 9-10=smooth, 5-6=noticeable hesitations, 1-2=fragmented.',
-    'volumeRating: "too quiet" | "acceptable" | "too loud".',
-    'paceRating: "too slow" | "appropriate" | "too fast".',
-    'Provide short, constructive, encouraging feedback in English.',
-    'Return ONLY valid compact JSON with these exact keys: pronunciationScore, clarityScore, fluencyScore, volumeRating, paceRating, strengths, areasForImprovement, mispronouncedWords, missingWords, extraWords, overallFeedback, nextPracticeFocus.',
-    'strengths and areasForImprovement: max 3 short items each.',
-    'mispronouncedWords: max 5 items, each with word, issue, suggestion.',
-    'missingWords and extraWords: plain string arrays, max 10 items each.',
-    'overallFeedback and nextPracticeFocus: 1-2 sentences each. Be concise.'
+    'You are a VSTEP speaking examiner scoring a pronunciation and delivery practice task.',
+    'Evaluate delivery (pronunciation, clarity, fluency, pace) only. Do not judge content.',
+    'Scores 1-10 (10=best). Provide concise, constructive English feedback.',
+    'Return ONLY JSON: {pronunciationScore, clarityScore, fluencyScore, volumeRating, paceRating, strengths, areasForImprovement, mispronouncedWords, missingWords, extraWords, overallFeedback, nextPracticeFocus}.',
+    'mispronouncedWords format: {word, issue, suggestion}. Arrays max 5 items.'
   ].join(' ');
 
   // ---------- User Prompt ----------
@@ -1171,8 +957,7 @@ export const generateSpeakingPracticeAssessment = async ({
     // Gemini output for this schema (12 fields, arrays, subobjects) needs ~800-1500 tokens.
     // Using English feedback (not Vietnamese) already saves ~30-40% output tokens.
     // 4096 provides a safe headroom for any response length.
-    maxOutputTokens: 4096,
-    
+    maxOutputTokens: 8192, // increased from 4096: thinkingBudget=0, safe headroom for full schema
   });
 
 
