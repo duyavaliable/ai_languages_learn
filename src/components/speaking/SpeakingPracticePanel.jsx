@@ -28,7 +28,6 @@ export default function SpeakingPracticePanel({ title, question, apiPrefix = '/a
   // Refs
   const recognitionRef = useRef(null);
   const transcriptBoxRef = useRef(null);
-  const liveEndRef = useRef(null);
   const finalTranscriptRef = useRef('');
   const liveTranscriptRef = useRef('');
   const scriptSectionRef = useRef(null);
@@ -149,9 +148,11 @@ export default function SpeakingPracticePanel({ title, question, apiPrefix = '/a
     };
   }, []);
 
-  // ── Auto-scroll live transcript ────────────────────────────────────────────
+  // ── Auto-scroll live transcript (inside the box only, not the page) ────────
   useEffect(() => {
-    liveEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const box = transcriptBoxRef.current;
+    if (!box) return;
+    box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
   }, [liveTranscript]);
 
   // ── Alignment (local, no Gemini) ───────────────────────────────────────────
@@ -297,6 +298,13 @@ export default function SpeakingPracticePanel({ title, question, apiPrefix = '/a
   };
 
   // ── Render live transcript tokens (Your Script) ────────────────────────────
+  const getLiveTokenWrongLabel = (type) => {
+    if (type === 'addition') return 'Thêm từ (không có trong script)';
+    if (type === 'mispronunciationCandidate') return 'Có thể phát âm sai';
+    if (type === 'mismatch') return 'Không khớp với script';
+    return 'Cần sửa';
+  };
+
   const renderLiveTokens = () => {
     if (!liveTokens.length) {
       return (
@@ -308,34 +316,35 @@ export default function SpeakingPracticePanel({ title, question, apiPrefix = '/a
     return liveTokens.map((token) => {
       const aligned = tokenAlignmentMap.get(`live-${token.start}`);
       const type = aligned?.type;
-      const tokenClass =
-        type === 'correct'
-          ? 'bg-emerald-500/15 text-emerald-700 border-emerald-400/30'
-          : type === 'addition'
-          ? 'bg-yellow-400/20 text-amber-800 border-yellow-400/50'
-          : type === 'mispronunciationCandidate'
-          ? 'bg-red-400/20 text-red-700 border-red-400/40 cursor-pointer'
-          : 'bg-background border-border';
+      const isWrong = Boolean(type && type !== 'correct');
+
+      if (!isWrong) {
+        return (
+          <span key={`live-${token.start}-${token.text}`}>
+            {token.text}{' '}
+          </span>
+        );
+      }
 
       return (
-        <button
-          key={`live-${token.start}-${token.text}`}
-          type="button"
-          onClick={() =>
-            type && type !== 'correct' &&
-            openMistake({
-              id: `live-${token.start}`,
-              type,
-              text: token.text,
-              scriptToken: aligned?.expected?.text || '',
-              transcriptToken: token.text,
-              label: type === 'addition' ? 'Thêm từ' : 'Có thể phát âm sai',
-            })
-          }
-          className={`rounded-full border px-2.5 py-1 text-sm transition-smooth hover:scale-[1.01] ${tokenClass}`}
-        >
-          {token.text}
-        </button>
+        <span key={`live-${token.start}-${token.text}`}>
+          <button
+            type="button"
+            onClick={() =>
+              openMistake({
+                id: `live-${token.start}`,
+                type,
+                text: token.text,
+                scriptToken: aligned?.expected?.text || '',
+                transcriptToken: token.text,
+                label: getLiveTokenWrongLabel(type),
+              })
+            }
+            className="inline cursor-pointer border-0 bg-transparent p-0 font-inherit text-sm text-red-600 underline-offset-2 transition-smooth hover:underline"
+          >
+            {token.text}
+          </button>{' '}
+        </span>
       );
     });
   };
@@ -472,12 +481,11 @@ export default function SpeakingPracticePanel({ title, question, apiPrefix = '/a
 
               <div
                 ref={transcriptBoxRef}
-                className="mt-4 max-h-52 min-h-[80px] overflow-y-auto rounded-2xl border border-border bg-secondary/30 p-4"
+                className="mt-4 h-52 min-h-[80px] overflow-y-auto overscroll-y-contain rounded-2xl border border-border bg-secondary/30 p-4"
               >
-                <div className="flex flex-wrap gap-1.5">
+                <p className="text-sm leading-7 text-foreground/90">
                   {renderLiveTokens()}
-                  <span ref={liveEndRef} />
-                </div>
+                </p>
               </div>
 
               {recognitionError && (
@@ -618,47 +626,16 @@ export default function SpeakingPracticePanel({ title, question, apiPrefix = '/a
             )}
           </div>
 
-          {/* ── SIDEBAR: Mistakes Panel ──────────────────────────────────── */}
+          {/* ── SIDEBAR: Legend ──────────────────────────────────────────── */}
           <aside className="space-y-4">
-            <div className="rounded-[28px] border border-border bg-card p-5 shadow-card">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                Lỗi phát hiện
-              </p>
-              <div className="mt-3 space-y-2">
-                {mistakeEntries.length > 0 ? (
-                  mistakeEntries.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => openMistake(item)}
-                      className="flex w-full items-center justify-between rounded-2xl border border-border bg-background px-3 py-2 text-left text-sm transition-smooth hover:border-primary"
-                    >
-                      <span>
-                        <span className="font-semibold">{item.label}:</span>{' '}
-                        <span className="text-foreground/80">{item.text}</span>
-                      </span>
-                      <span className="ml-2 shrink-0 text-xs text-muted-foreground">Sửa</span>
-                    </button>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    {liveTranscript
-                      ? 'Không phát hiện lỗi nào. Tốt lắm!'
-                      : 'Chưa có lỗi nào được phát hiện.'}
-                  </p>
-                )}
-              </div>
-            </div>
-
             {/* Legend */}
             <div className="rounded-[28px] border border-border bg-card p-5 shadow-card">
               <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                 Chú thích màu
               </p>
               <div className="space-y-2 text-xs">
-                <LegendItem color="bg-emerald-500" label="Your Script — Đúng" />
-                <LegendItem color="bg-yellow-400" label="Your Script — Thêm từ" />
-                <LegendItem color="bg-red-400" label="Your Script — Có thể phát âm sai" />
+                <LegendItem color="bg-foreground/80" label="Your Script — Khớp script (chữ bình thường)" />
+                <LegendItem color="bg-red-500" label="Your Script — Không khớp script / thêm từ / phát âm sai" />
                 <LegendItem color="bg-yellow-300" label="Script — Bỏ sót / Sai từ" border />
               </div>
             </div>

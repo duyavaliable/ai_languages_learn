@@ -1,11 +1,48 @@
 import fs from 'fs';
+import crypto from 'crypto';
 import { fetchWithTimeoutRetryCircuit } from './aiWrapper.js';
+import { aiResponseCache, buildCacheKey } from './cacheService.js';
 
 const RAW_API_KEYS = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '';
 const GEMINI_API_KEY = RAW_API_KEYS.split(',')[0]?.trim() || '';
 
 
 const GEMINI_MODEL_TEXT = 'gemini-2.5-flash';
+
+// ── Queue & Deduplication ──────────────────────────────────────────────────
+class AsyncQueue {
+  constructor(concurrency = 2) {
+    this.concurrency = concurrency;
+    this.running = 0;
+    this.queue = [];
+  }
+
+  async enqueue(taskFn) {
+    if (this.running >= this.concurrency) {
+      await new Promise(resolve => this.queue.push(resolve));
+    }
+    this.running++;
+    try {
+      return await taskFn();
+    } finally {
+      this.running--;
+      if (this.queue.length > 0) {
+        const next = this.queue.shift();
+        next();
+      }
+    }
+  }
+}
+
+const geminiQueue = new AsyncQueue(2); // Max 2 concurrent Gemini API calls
+const inflightGeminiRequests = new Map();
+
+function getGeminiDeduplicationKey(systemInstruction, userPrompt, hasUserParts) {
+  if (hasUserParts) return null; // Do not deduplicate multimodal requests
+  const payload = `${systemInstruction || ''}|||${userPrompt || ''}`;
+  return crypto.createHash('sha256').update(payload).digest('hex');
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 const getGeminiListModelsEndpoint = (key) =>
   `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`;
@@ -22,107 +59,149 @@ function ensureGeminiConfigured() {
   }
 }
 
-export async function generateGeminiText({ systemInstruction, userPrompt, userParts = [], temperature = 0.6, maxOutputTokens = 1024, forceJsonOutput = false }) {
+export async function generateGeminiText({ systemInstruction, userPrompt, userParts = [], temperature = 0.6, maxOutputTokens = 1024, forceJsonOutput = false, cacheConfig = null, forceRegenerate = false }) {
   ensureGeminiConfigured();
 
-  const currentKey = GEMINI_API_KEY;
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_TEXT}:generateContent?key=${encodeURIComponent(currentKey)}`;
-  const safeEndpoint = endpoint.replace(encodeURIComponent(currentKey), '***MASKED***');
+  const hasUserParts = userParts && userParts.length > 0;
+  
+  // 1. Cache Lookup
+  let cacheKey = null;
+  if (cacheConfig && !hasUserParts) {
+    cacheKey = buildCacheKey({
+      model: GEMINI_MODEL_TEXT,
+      version: cacheConfig.version,
+      action: cacheConfig.action,
+      input: userPrompt,
+      config: { temp: temperature, tokens: maxOutputTokens }
+    });
 
-  const body = {
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: userPrompt }, ...userParts]
+    if (!forceRegenerate) {
+      const cachedResponse = aiResponseCache.get(cacheKey);
+      if (cachedResponse) {
+        console.log(`[Cache] HIT for ${cacheConfig.action} (key: ${cacheKey})`);
+        return cachedResponse;
       }
-    ],
-    generationConfig: {
-      temperature,
-      maxOutputTokens,
-      thinkingConfig: { thinkingBudget: 0 } // Disable thinking tokens — avoids token budget drain and latency spike
     }
-  };
-
-  if (forceJsonOutput) {
-    body.generationConfig.responseMimeType = 'application/json';
   }
 
-  if (systemInstruction) {
-    body.systemInstruction = {
-      parts: [{ text: systemInstruction }]
+  // 2. Deduplication
+  const dedupKey = getGeminiDeduplicationKey(systemInstruction, userPrompt, hasUserParts);
+
+  if (dedupKey && inflightGeminiRequests.has(dedupKey)) {
+    console.log(`[Deduplication] generateGeminiText reusing inflight request for hash ${dedupKey.substring(0,8)}`);
+    return inflightGeminiRequests.get(dedupKey);
+  }
+
+  const requestPromise = geminiQueue.enqueue(async () => {
+    const currentKey = GEMINI_API_KEY;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_TEXT}:generateContent?key=${encodeURIComponent(currentKey)}`;
+    const safeEndpoint = endpoint.replace(encodeURIComponent(currentKey), '***MASKED***');
+
+    const body = {
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: userPrompt }, ...userParts]
+        }
+      ],
+      generationConfig: {
+        temperature,
+        maxOutputTokens,
+        thinkingConfig: { thinkingBudget: 0 } // Disable thinking tokens — avoids token budget drain and latency spike
+      }
     };
-  }
 
-  const response = await fetchWithTimeoutRetryCircuit(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  }, {
-    timeoutMs: 28000,
-    retries: 1,  // 1 retry on transient errors (network/timeout)
-    apiKey: currentKey,
-    label: 'generateGeminiText'
+    if (forceJsonOutput) {
+      body.generationConfig.responseMimeType = 'application/json';
+    }
+
+    if (systemInstruction) {
+      body.systemInstruction = {
+        parts: [{ text: systemInstruction }]
+      };
+    }
+
+    const response = await fetchWithTimeoutRetryCircuit(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }, {
+      timeoutMs: 28000,
+      retries: 2,  // increased from 1 to 2 since queue smooths out traffic
+      apiKey: currentKey,
+      label: 'generateGeminiText'
+    });
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch (err) {
+      if (!response.ok) {
+        throw new Error(`Gemini request failed with status ${response.status} (non-JSON body)`);
+      }
+      throw new Error('Gemini request returned invalid JSON format');
+    }
+
+    const finishReason = data?.candidates?.[0]?.finishReason || null;
+    if (finishReason && String(finishReason).toUpperCase().includes('MAX_TOKENS')) {
+      console.error('[Gemini] ❌ Output TRUNCATED by token limit — JSON will be broken', {
+        finishReason,
+        model: GEMINI_MODEL_TEXT,
+        maxOutputTokens,
+        outputSoFarLength: (() => {
+          try {
+            return (data?.candidates || [])
+              .flatMap(c => c?.content?.parts || [])
+              .map(p => p?.text || '').join('').length;
+          } catch { return -1; }
+        })()
+      });
+      throw new Error(
+        `Gemini output was cut off by token limit (maxOutputTokens=${maxOutputTokens}). ` +
+        'Increase maxOutputTokens or shorten the prompt to get complete JSON.'
+      );
+    }
+
+    if (!response.ok) {
+      const apiMessage = data?.error?.message || `Gemini request failed with status ${response.status}`;
+      console.error('[Gemini] generateContent failed', {
+        model: GEMINI_MODEL_TEXT,
+        status: response.status,
+        endpoint: safeEndpoint,
+        key: getMaskedKey(currentKey),
+        error: data?.error || data
+      });
+      throw new Error(`${apiMessage} [current model: ${GEMINI_MODEL_TEXT}]`);
+    }
+
+    const output = (data?.candidates || [])
+      .flatMap((candidate) => candidate?.content?.parts || [])
+      .map((part) => part?.text || '')
+      .join('')
+      .trim();
+
+    if (!output) {
+      console.error('[Gemini] Empty output extracted from response', {
+        candidatesCount: data?.candidates?.length,
+        firstCandidateContent: data?.candidates?.[0]?.content
+      });
+      throw new Error('Gemini returned empty content');
+    }
+
+    if (cacheKey && !forceRegenerate && cacheConfig?.ttl) {
+      aiResponseCache.set(cacheKey, output, cacheConfig.ttl);
+      console.log(`[Cache] SAVED for ${cacheConfig.action} (key: ${cacheKey}, ttl: ${cacheConfig.ttl}ms)`);
+    }
+
+    return output;
   });
 
-  let data = null;
-  try {
-    data = await response.json();
-  } catch (err) {
-    if (!response.ok) {
-      throw new Error(`Gemini request failed with status ${response.status} (non-JSON body)`);
-    }
-    throw new Error('Gemini request returned invalid JSON format');
+  if (dedupKey) {
+    inflightGeminiRequests.set(dedupKey, requestPromise);
+    requestPromise.finally(() => inflightGeminiRequests.delete(dedupKey));
   }
 
-  const finishReason = data?.candidates?.[0]?.finishReason || null;
-  if (finishReason && String(finishReason).toUpperCase().includes('MAX_TOKENS')) {
-    console.error('[Gemini] ❌ Output TRUNCATED by token limit — JSON will be broken', {
-      finishReason,
-      model: GEMINI_MODEL_TEXT,
-      maxOutputTokens,
-      outputSoFarLength: (() => {
-        try {
-          return (data?.candidates || [])
-            .flatMap(c => c?.content?.parts || [])
-            .map(p => p?.text || '').join('').length;
-        } catch { return -1; }
-      })()
-    });
-    throw new Error(
-      `Gemini output was cut off by token limit (maxOutputTokens=${maxOutputTokens}). ` +
-      'Increase maxOutputTokens or shorten the prompt to get complete JSON.'
-    );
-  }
-
-  if (!response.ok) {
-    const apiMessage = data?.error?.message || `Gemini request failed with status ${response.status}`;
-    console.error('[Gemini] generateContent failed', {
-      model: GEMINI_MODEL_TEXT,
-      status: response.status,
-      endpoint: safeEndpoint,
-      key: getMaskedKey(currentKey),
-      error: data?.error || data
-    });
-    throw new Error(`${apiMessage} [current model: ${GEMINI_MODEL_TEXT}]`);
-  }
-
-  const output = (data?.candidates || [])
-    .flatMap((candidate) => candidate?.content?.parts || [])
-    .map((part) => part?.text || '')
-    .join('')
-    .trim();
-
-  if (!output) {
-    console.error('[Gemini] Empty output extracted from response', {
-      candidatesCount: data?.candidates?.length,
-      firstCandidateContent: data?.candidates?.[0]?.content
-    });
-    throw new Error('Gemini returned empty content');
-  }
-
-
-
-  return output;
+  return requestPromise;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -137,105 +216,149 @@ export async function generateGeminiText({ systemInstruction, userPrompt, userPa
 // Use this for: speaking assessment, pronunciation feedback, exercise generation,
 //               script rephrasing, scoring systems — all JSON-based workflows.
 // ─────────────────────────────────────────────────────────────────────────────
-export async function generateGeminiJson({ systemInstruction, userPrompt, userParts = [], temperature = 0.6, maxOutputTokens = 1024, timeoutMs = 28000 }) {
+export async function generateGeminiJson({ systemInstruction, userPrompt, userParts = [], temperature = 0.6, maxOutputTokens = 1024, timeoutMs = 28000, cacheConfig = null, forceRegenerate = false }) {
   ensureGeminiConfigured();
 
-  const currentKey = GEMINI_API_KEY;
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_TEXT}:generateContent?key=${encodeURIComponent(currentKey)}`;
-  const safeEndpoint = endpoint.replace(encodeURIComponent(currentKey), '***MASKED***');
+  const hasUserParts = userParts && userParts.length > 0;
 
-  const body = {
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: userPrompt }, ...userParts]
+  // 1. Cache Lookup
+  let cacheKey = null;
+  if (cacheConfig && !hasUserParts) {
+    cacheKey = buildCacheKey({
+      model: GEMINI_MODEL_TEXT,
+      version: cacheConfig.version,
+      action: cacheConfig.action,
+      input: userPrompt,
+      config: { temp: temperature, tokens: maxOutputTokens }
+    });
+
+    if (!forceRegenerate) {
+      const cachedResponse = aiResponseCache.get(cacheKey);
+      if (cachedResponse) {
+        console.log(`[Cache] HIT for ${cacheConfig.action} (key: ${cacheKey})`);
+        return cachedResponse;
       }
-    ],
-    generationConfig: {
-      temperature,
-      maxOutputTokens,
-      responseMimeType: 'application/json',  // always JSON for this service
-      thinkingConfig: { thinkingBudget: 0 } // Disable thinking tokens — avoids token budget drain and latency spike
     }
-  };
-
-  if (systemInstruction) {
-    body.systemInstruction = {
-      parts: [{ text: systemInstruction }]
-    };
   }
 
-  const tStart = Date.now();
+  // 2. Deduplication
+  const dedupKey = getGeminiDeduplicationKey(systemInstruction, userPrompt, hasUserParts);
 
-  const response = await fetchWithTimeoutRetryCircuit(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  }, {
-    timeoutMs, // caller-supplied (default 28000; audio calls may pass 45000)
-    retries: 1,
-    apiKey: currentKey,
-    label: 'generateGeminiJson'
+  if (dedupKey && inflightGeminiRequests.has(dedupKey)) {
+    console.log(`[Deduplication] generateGeminiJson reusing inflight request for hash ${dedupKey.substring(0,8)}`);
+    return inflightGeminiRequests.get(dedupKey);
+  }
+
+  const requestPromise = geminiQueue.enqueue(async () => {
+    const currentKey = GEMINI_API_KEY;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_TEXT}:generateContent?key=${encodeURIComponent(currentKey)}`;
+    const safeEndpoint = endpoint.replace(encodeURIComponent(currentKey), '***MASKED***');
+
+    const body = {
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: userPrompt }, ...userParts]
+        }
+      ],
+      generationConfig: {
+        temperature,
+        maxOutputTokens,
+        responseMimeType: 'application/json',  // always JSON for this service
+        thinkingConfig: { thinkingBudget: 0 } // Disable thinking tokens — avoids token budget drain and latency spike
+      }
+    };
+
+    if (systemInstruction) {
+      body.systemInstruction = {
+        parts: [{ text: systemInstruction }]
+      };
+    }
+
+    const tStart = Date.now();
+
+    const response = await fetchWithTimeoutRetryCircuit(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }, {
+      timeoutMs, // caller-supplied (default 28000; audio calls may pass 45000)
+      retries: 2, // increased from 1 to 2 since queue smooths out traffic
+      apiKey: currentKey,
+      label: 'generateGeminiJson'
+    });
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch (err) {
+      if (!response.ok) {
+        throw new Error(`Gemini JSON request failed with status ${response.status} (non-JSON body)`);
+      }
+      throw new Error('Gemini JSON request returned invalid response format');
+    }
+
+    if (!response.ok) {
+      const apiMessage = data?.error?.message || `Gemini request failed with status ${response.status}`;
+      console.error('[GeminiJson] Request failed', {
+        model: GEMINI_MODEL_TEXT,
+        status: response.status,
+        endpoint: safeEndpoint,
+        key: getMaskedKey(currentKey),
+        error: data?.error || data
+      });
+      throw new Error(`${apiMessage} [current model: ${GEMINI_MODEL_TEXT}]`);
+    }
+
+    // Bóc tách rawText trước khi trim — để đo chính xác độ dài gốc
+    const rawText = (data?.candidates || [])
+      .flatMap((candidate) => candidate?.content?.parts || [])
+      .map((part) => part?.text || '')
+      .join('');
+
+    const output = rawText.trim();
+    const usageMetadata = data?.usageMetadata || {};
+    const finishReason = data?.candidates?.[0]?.finishReason || null;
+    const geminiMs = Date.now() - tStart;
+
+    if (finishReason && String(finishReason).toUpperCase().includes('MAX_TOKENS')) {
+      // Cảnh báo — không throw ngay. Nếu JSON đã hoàn chỉnh thì parseJsonContent sẽ xử lý được.
+      // Nếu JSON thực sự bị cụt, parseJsonContent sẽ throw lỗi rõ ràng ở tầng trên.
+      console.warn('[GeminiJson] ⚠️ MAX_TOKENS flagged — JSON may be truncated', {
+        finishReason,
+        model: GEMINI_MODEL_TEXT,
+        sentMaxTokens: maxOutputTokens,
+        geminiMs,
+        usageMetadata,
+        rawTextLength: rawText.length,
+        trimmedLength: output.length,
+        tailBase64: Buffer.from(rawText.slice(-50)).toString('base64'),
+        tailText: rawText.slice(-50)
+      });
+    }
+
+    if (!output) {
+      console.error('[GeminiJson] Empty output from response', {
+        candidatesCount: data?.candidates?.length,
+        usageMetadata
+      });
+      throw new Error('Gemini returned empty JSON content');
+    }
+
+    if (cacheKey && !forceRegenerate && cacheConfig?.ttl) {
+      aiResponseCache.set(cacheKey, output, cacheConfig.ttl);
+      console.log(`[Cache] SAVED for ${cacheConfig.action} (key: ${cacheKey}, ttl: ${cacheConfig.ttl}ms)`);
+    }
+
+    return output;
   });
 
-  let data = null;
-  try {
-    data = await response.json();
-  } catch (err) {
-    if (!response.ok) {
-      throw new Error(`Gemini JSON request failed with status ${response.status} (non-JSON body)`);
-    }
-    throw new Error('Gemini JSON request returned invalid response format');
+  if (dedupKey) {
+    inflightGeminiRequests.set(dedupKey, requestPromise);
+    requestPromise.finally(() => inflightGeminiRequests.delete(dedupKey));
   }
 
-  if (!response.ok) {
-    const apiMessage = data?.error?.message || `Gemini request failed with status ${response.status}`;
-    console.error('[GeminiJson] Request failed', {
-      model: GEMINI_MODEL_TEXT,
-      status: response.status,
-      endpoint: safeEndpoint,
-      key: getMaskedKey(currentKey),
-      error: data?.error || data
-    });
-    throw new Error(`${apiMessage} [current model: ${GEMINI_MODEL_TEXT}]`);
-  }
-
-  // Bóc tách rawText trước khi trim — để đo chính xác độ dài gốc
-  const rawText = (data?.candidates || [])
-    .flatMap((candidate) => candidate?.content?.parts || [])
-    .map((part) => part?.text || '')
-    .join('');
-
-  const output = rawText.trim();
-  const usageMetadata = data?.usageMetadata || {};
-  const finishReason = data?.candidates?.[0]?.finishReason || null;
-  const geminiMs = Date.now() - tStart;
-
-  if (finishReason && String(finishReason).toUpperCase().includes('MAX_TOKENS')) {
-    // Cảnh báo — không throw ngay. Nếu JSON đã hoàn chỉnh thì parseJsonContent sẽ xử lý được.
-    // Nếu JSON thực sự bị cụt, parseJsonContent sẽ throw lỗi rõ ràng ở tầng trên.
-    console.warn('[GeminiJson] ⚠️ MAX_TOKENS flagged — JSON may be truncated', {
-      finishReason,
-      model: GEMINI_MODEL_TEXT,
-      sentMaxTokens: maxOutputTokens,
-      geminiMs,
-      usageMetadata,
-      rawTextLength: rawText.length,
-      trimmedLength: output.length,
-      tailBase64: Buffer.from(rawText.slice(-50)).toString('base64'),
-      tailText: rawText.slice(-50)
-    });
-  }
-
-  if (!output) {
-    console.error('[GeminiJson] Empty output from response', {
-      candidatesCount: data?.candidates?.length,
-      usageMetadata
-    });
-    throw new Error('Gemini returned empty JSON content');
-  }
-
-  return output;
+  return requestPromise;
 }
 
 
@@ -665,7 +788,12 @@ export const rephraseSpeakingFragment = async ({
       `Context: ${safeContext || '(not provided)'}`
     ].join('\n'),
     temperature: 0.3,
-    maxOutputTokens: 1024 // increased from 256: thinkingBudget=0 so no thinking token drain
+    maxOutputTokens: 1024, // increased from 256: thinkingBudget=0 so no thinking token drain
+    cacheConfig: {
+      action: `rephrase-${safeAction}`,
+      version: 'v1',
+      ttl: 7 * 24 * 60 * 60 * 1000 // 7 days
+    }
   });
 
   const parsed = parseJsonContent(aiText);
@@ -713,7 +841,12 @@ export const rephraseSpeakingFragmentV2 = async ({
         `Context: "${safeOriginalScript || '(not provided)'}"`
       ].join('\n'),
       temperature: 0.3,
-      maxOutputTokens: 2048 // increased: thinkingBudget=0 so all tokens go to output
+      maxOutputTokens: 2048, // increased: thinkingBudget=0 so all tokens go to output
+      cacheConfig: {
+        action: 'rephrase-v2',
+        version: 'v1',
+        ttl: 7 * 24 * 60 * 60 * 1000 // 7 days
+      }
     });
 
     // 4. Try-catch protection for parsing
@@ -871,7 +1004,7 @@ function detectVstepPart(part, questionText) {
   return 1;
 }
 
-export const generateVstepModelScript = async ({ question, part }) => {
+export const generateVstepModelScript = async ({ question, part, forceRegenerate = false }) => {
   const safeQuestion = String(question || '').trim();
   if (!safeQuestion) throw new Error('question is required');
 
@@ -882,7 +1015,13 @@ export const generateVstepModelScript = async ({ question, part }) => {
     systemInstruction: PART_INSTRUCTIONS[partNum],
     userPrompt: `VSTEP Speaking Question: ${safeQuestion}\nGenerate the model answer now. Return JSON only.`,
     temperature: 0.55,
-    maxOutputTokens: maxTokens
+    maxOutputTokens: maxTokens,
+    cacheConfig: {
+      action: `vstep-script-part${partNum}`,
+      version: 'v2.0', // Structure-driven prompt version
+      ttl: 30 * 24 * 60 * 60 * 1000 // 30 days
+    },
+    forceRegenerate
   });
 
   const parsed = parseJsonContent(aiText);

@@ -69,11 +69,11 @@ export const evaluatePronunciation = async (req, res) => {
 export const generateSpeakingScript = async (req, res) => {
   const t0 = Date.now();
   try {
-    const { question, part } = req.body || {};
+    const { question, part, forceRegenerate } = req.body || {};
     if (!String(question || '').trim()) {
       return res.status(400).json({ message: 'question is required' });
     }
-    const result = await generateVstepModelScript({ question, part });
+    const result = await generateVstepModelScript({ question, part, forceRegenerate: forceRegenerate === true || forceRegenerate === 'true' });
     console.log('[AI Controller] generateSpeakingScript done', { totalMs: Date.now() - t0 });
     return res.json(result);
   } catch (error) {
