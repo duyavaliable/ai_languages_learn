@@ -379,12 +379,16 @@ export const generateWritingAssist = async (req, res) => {
     }
 
     const systemInstruction = [
-      'You are an IELTS/CEFR writing coach.',
+      'You are an expert VSTEP Writing Examiner (CEFR B1-C1 level).',
+      'STEP 1: Identify the task type based on the prompt (Task 1: Informal/Formal Letter, Task 2: Opinion/Discussion/Problem-Solution Essay).',
+      'STEP 2: Generate guidance specific to the identified task type.',
+      '- If Letter: structureTips must include Salutation, Opening, Body paragraphs addressing all bullet points, Closing, and Sign-off.',
+      '- If Essay: structureTips must include Introduction (hook + thesis), Body paragraphs (topic sentences + support), and Conclusion.',
       'Return strict JSON only.',
-      'JSON object keys: structureTips (array of exactly 4 short strings), sampleAnswer (string).',
+      'JSON object keys: taskTypeDetected (string), structureTips (array of exactly 4 short strings), sampleAnswer (string).',
       'If includeSampleAnswer is false then sampleAnswer must be empty string.',
       'Keep tips concise and practical.'
-    ].join(' ');
+    ].join('\n');
 
     const userPrompt = [
       `Task prompt: ${taskPrompt}`,
@@ -393,12 +397,20 @@ export const generateWritingAssist = async (req, res) => {
       'Generate writing guidance for this exact prompt.'
     ].join('\n');
 
+    const cacheConfig = {
+      action: 'writing-assist',
+      version: 'v2.0',
+      input: `${taskPrompt}_${String(submissionText || '').trim()}_${Boolean(includeSampleAnswer)}`,
+      ttl: 30 * 24 * 60 * 60 * 1000 // 30 days
+    };
+
     const aiRaw = await generateGeminiText({
       systemInstruction,
       userPrompt,
       temperature: 0.3,
-      maxOutputTokens: 2048, // increased from 900: thinkingBudget=0 so all tokens go to output
-      forceJsonOutput: true
+      maxOutputTokens: 2048,
+      forceJsonOutput: true,
+      cacheConfig
     });
 
     let parsed;

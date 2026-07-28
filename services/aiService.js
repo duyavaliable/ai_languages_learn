@@ -198,7 +198,7 @@ export async function generateGeminiText({ systemInstruction, userPrompt, userPa
 
   if (dedupKey) {
     inflightGeminiRequests.set(dedupKey, requestPromise);
-    requestPromise.finally(() => inflightGeminiRequests.delete(dedupKey));
+    requestPromise.finally(() => inflightGeminiRequests.delete(dedupKey)).catch(() => {});
   }
 
   return requestPromise;
@@ -355,7 +355,7 @@ export async function generateGeminiJson({ systemInstruction, userPrompt, userPa
 
   if (dedupKey) {
     inflightGeminiRequests.set(dedupKey, requestPromise);
-    requestPromise.finally(() => inflightGeminiRequests.delete(dedupKey));
+    requestPromise.finally(() => inflightGeminiRequests.delete(dedupKey)).catch(() => {});
   }
 
   return requestPromise;
@@ -889,24 +889,18 @@ export const rephraseSpeakingFragmentV2 = async ({
 const PART_INSTRUCTIONS = {
   1: [
     'You are a VSTEP Speaking examiner writing a model answer for Part 1.',
-    'PART 1 is Social Interaction — a natural conversational exchange.',
-    'The candidate responds personally and directly. No formal structure required.',
+    'PART 1 is Social Interaction. The candidate usually receives a main topic followed by 2 to 4 sub-questions.',
     'TARGET: CEFR B1-B2. Vietnamese university student.',
-    'Similar to a strong VSTEP Speaking Part 1 response.',
-    'RESPONSE FLOW (flexible — not rigid sections):',
-    '→ Respond directly to the question (personal, first-person)',
-    '→ Give a brief reason or feeling',
-    '→ Add a small personal detail or example ONLY IF it flows naturally',
-    'TONE RULES:',
-    '- Sound like real spoken conversation, NOT an essay or a speech',
-    '- Use first-person: "I", "my", "me"',
-    '- Natural spoken openers are welcome: "Well,", "Actually,", "Yeah,"',
-    '- Natural spoken connectors: "So,", "Because,", "I mean,", "You know,"',
-    '- Do NOT open with "In my opinion," or "I think that..." as a formal thesis',
-    '- Do NOT write a formal conclusion ("In conclusion," / "To sum up,")',
-    '- Do NOT use academic linking words ("Furthermore,", "Therefore,", "Hence,")',
-    '- Do NOT over-explain — keep it casual and genuine',
-    'LENGTH: 40–80 words total. Do not exceed.',
+    'CRITICAL RULES:',
+    '1. YOU MUST ANSWER EVERY SINGLE QUESTION in the prompt in the exact order they are asked. Do not skip any question.',
+    '2. Address each question naturally, linking them together as one continuous spoken response.',
+    '3. For each question, provide a direct answer followed by a brief reason or personal example.',
+    'TONE & STYLE:',
+    '- Sound like real spoken conversation, NOT an essay.',
+    '- Use first-person ("I", "my", "me").',
+    '- Use natural spoken connectors ("Well,", "Actually,", "To be honest,", "As for...").',
+    '- Do NOT use academic linkers like "Furthermore" or "In conclusion".',
+    'LENGTH: 80 - 150 words total (depending on the number of sub-questions).',
     'Return JSON: {"script": "..."}'
   ].join('\n'),
   2: [
@@ -1157,4 +1151,60 @@ export async function transcribeAudioWithAI(audioPath) {
   }
 }
 
+export const explainReadingAnswers = async (passage, questions, forceRegenerate = false) => {
+  if (!Array.isArray(questions) || questions.length === 0) return [];
+  
+  const CHUNK_SIZE = 5;
+  const chunks = [];
+  for (let i = 0; i < questions.length; i += CHUNK_SIZE) {
+    chunks.push(questions.slice(i, i + CHUNK_SIZE));
+  }
 
+  const systemInstruction = [
+    'You are an expert VSTEP Reading Teacher.',
+    'I will provide a reading passage and a list of specific questions.',
+    'For each question, provide a short, precise explanation.',
+    'Return ONLY a JSON array of objects with this structure:',
+    '[',
+    '  {',
+    '    "question_id": "id or index",',
+    '    "correct_answer": "The exact option text",',
+    '    "explanation": "Why this is correct based on the text (quote the clue briefly).",',
+    '    "why_others_wrong": "Briefly explain why other tricky options are incorrect.",',
+    '    "strategy_tip": "One short tip on how to locate the answer (e.g. Scanning for keywords)."',
+    '  }',
+    ']',
+    'Keep explanations concise, easy to understand for B1-B2 students. No grammar jargon unless necessary.'
+  ].join('\n');
+
+  const promises = chunks.map(async (chunk) => {
+    const userPrompt = `Passage:\n${String(passage || '').trim()}\n\nQuestions:\n${JSON.stringify(chunk, null, 2)}`;
+    
+    const cacheConfig = {
+      action: 'explain-reading-chunk',
+      version: 'v1.0-reading-explanation',
+      input: `${String(passage || '').trim()}_${JSON.stringify(chunk)}`,
+      ttl: 30 * 24 * 60 * 60 * 1000 // 30 days
+    };
+
+    try {
+      const resultStr = await generateGeminiJson({
+        systemInstruction,
+        userPrompt,
+        temperature: 0.2,
+        maxOutputTokens: 2048,
+        cacheConfig,
+        forceRegenerate
+      });
+      
+      const parsed = parseJsonContent(resultStr);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+      console.error('[explainReadingAnswers] Failed to explain chunk:', err.message);
+      return [];
+    }
+  });
+
+  const results = await Promise.all(promises);
+  return results.flat();
+};

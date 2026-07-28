@@ -1,4 +1,4 @@
-import { checkPronunciation, rephraseSpeakingFragment, generateSpeakingPracticeAssessment, generateVstepModelScript, rephraseSpeakingFragmentV2 } from '../services/aiService.js';
+import { checkPronunciation, rephraseSpeakingFragment, generateSpeakingPracticeAssessment, generateVstepModelScript, rephraseSpeakingFragmentV2, explainReadingAnswers } from '../services/aiService.js';
 import { translateText } from '../services/translationService.js';
 import { Exercise } from '../models/index.js';
 import fs from 'fs/promises';
@@ -154,6 +154,28 @@ export const rephraseSpeakingTextV2 = async (req, res) => {
     return res.json(result);
   } catch (error) {
     console.error('[AI Controller] rephraseSpeakingTextV2 failed', { message: error?.message, stack: error?.stack });
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+export const explainReading = async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const { passage, questions, forceRegenerate } = req.body || {};
+    
+    if (!String(passage || '').trim()) {
+      return res.status(400).json({ message: 'passage is required' });
+    }
+    if (!Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ message: 'questions must be a non-empty array' });
+    }
+
+    const result = await explainReadingAnswers(passage, questions, forceRegenerate === true || forceRegenerate === 'true');
+
+    console.log('[AI Controller] explainReading done', { totalMs: Date.now() - t0, questionsCount: questions.length });
+    return res.json(result);
+  } catch (error) {
+    console.error('[AI Controller] explainReading failed', { message: error?.message, totalMs: Date.now() - t0 });
     return res.status(500).json({ message: error.message });
   }
 };

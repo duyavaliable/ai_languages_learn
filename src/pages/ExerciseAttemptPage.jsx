@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, BadgeCheck, BrainCircuit, CheckCircle2, Clock3, FileText, Headphones, Mic, MicOff, Pause, Play, SkipBack, SkipForward, Speaker, Sparkles, Volume2, X } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, BrainCircuit, CheckCircle2, ChevronDown, ChevronUp, Clock3, FileText, Headphones, Loader2, Mic, MicOff, Pause, Play, SkipBack, SkipForward, Speaker, Sparkles, Volume2, X } from 'lucide-react';
 import api from '../services/api';
 import SpeakingPracticePanel from '../components/speaking/SpeakingPracticePanel';
 
@@ -100,6 +100,9 @@ function ExerciseAttemptPage() {
   const [writingSampleAnswer, setWritingSampleAnswer] = useState('');
   const [writingAiLoading, setWritingAiLoading] = useState(false);
   const [speakingError, setSpeakingError] = useState('');
+  const [readingExplanations, setReadingExplanations] = useState({});
+  const [readingExplainLoadings, setReadingExplainLoadings] = useState({});
+  const [expandedExplanations, setExpandedExplanations] = useState({});
 
   const goBack = () => {
     navigate(-1);
@@ -237,6 +240,118 @@ function ExerciseAttemptPage() {
       return selected && selected === correctAnswerText ? acc + 1 : acc;
     }, 0);
   }, [submitted, questions, answers, isWriting]);
+
+  const fetchReadingExplanation = async (question, questionKey) => {
+    setReadingExplainLoadings(prev => {
+      if (prev[questionKey]) return prev;
+      return { ...prev, [questionKey]: true };
+    });
+    try {
+      const formattedQuestion = {
+        id: questionKey,
+        question: getQuestionText(question),
+        options: normalizeOptions(question).map(o => o.value)
+      };
+      const res = await api.post('/ai/reading/explain', {
+        passage: String(exercise?.reading_passage || '').trim(),
+        questions: [formattedQuestion]
+      });
+      const data = res.data || [];
+      if (data.length > 0) {
+        setReadingExplanations(prev => ({ ...prev, [questionKey]: data[0] }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch explanation:', err);
+    } finally {
+      setReadingExplainLoadings(prev => ({ ...prev, [questionKey]: false }));
+    }
+  };
+
+  const toggleExplanation = (question, questionKey) => {
+    if (!submitted) return;
+    setExpandedExplanations(prev => {
+      const isExpanded = !prev[questionKey];
+      if (isExpanded && !readingExplanations[questionKey] && !readingExplainLoadings[questionKey]) {
+        fetchReadingExplanation(question, questionKey);
+      }
+      return { ...prev, [questionKey]: isExpanded };
+    });
+  };
+
+  const fetchBatchReadingExplanations = async (batchQuestions) => {
+    if (!batchQuestions || batchQuestions.length === 0) return;
+    
+    setReadingExplainLoadings(prev => {
+      const next = { ...prev };
+      batchQuestions.forEach(q => { next[q.id] = true; });
+      return next;
+    });
+    
+    try {
+      const res = await api.post('/ai/reading/explain', {
+        passage: String(exercise?.reading_passage || '').trim(),
+        questions: batchQuestions
+      });
+      const data = res.data || [];
+      if (data.length > 0) {
+        setReadingExplanations(prev => {
+          const next = { ...prev };
+          data.forEach(item => {
+            if (item && item.question_id) {
+              next[item.question_id] = item;
+            }
+          });
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch batch explanations:', err);
+    } finally {
+      setReadingExplainLoadings(prev => {
+        const next = { ...prev };
+        batchQuestions.forEach(q => { next[q.id] = false; });
+        return next;
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (submitted && isReading && questions.length > 0) {
+      // Trigger batch expansion and fetching for all wrong answers
+      let hasWrong = false;
+      const questionsToFetch = [];
+      const newExpanded = {};
+      
+      questions.forEach((question, index) => {
+        const questionKey = getQuestionKey(question, index);
+        const selectedAnswer = answers[questionKey];
+        const correctAnswerText = resolveCorrectAnswerText(question);
+        const isWrong = selectedAnswer && selectedAnswer !== correctAnswerText;
+        
+        if (isWrong) {
+          hasWrong = true;
+          newExpanded[questionKey] = true;
+          // We assume readingExplanations is empty right after submit for wrong answers
+          questionsToFetch.push({
+            id: questionKey,
+            question: getQuestionText(question),
+            options: normalizeOptions(question).map(o => o.value)
+          });
+        }
+      });
+      
+      if (hasWrong) {
+        setExpandedExplanations(prev => ({ ...prev, ...newExpanded }));
+        if (questionsToFetch.length > 0) {
+          // Remove already fetched/loading to be safe, using functional state check inside fetch would be complex, 
+          // but since this only runs once when submitted becomes true, it's safe to just fetch them.
+          fetchBatchReadingExplanations(questionsToFetch);
+        }
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitted, isReading, questions]);
+
 
   const displaySkill = String(skill || exercise?.skill_type || '').toLowerCase();
   const hasQuestions = questions.length > 0;
@@ -601,12 +716,23 @@ function ExerciseAttemptPage() {
                       ref={(el) => {
                         questionRefs.current[index] = el;
                       }}
-                      className={`rounded-[24px] border bg-card p-5 shadow-card transition-smooth ${index === currentQuestion && !submitted ? 'border-primary shadow-elegant' : 'border-border'} ${isCorrect ? 'border-success bg-success/5' : ''} ${isWrong ? 'border-destructive bg-destructive/5' : ''}`}
+                      onClick={() => {
+                        if (submitted) toggleExplanation(question, questionKey);
+                      }}
+                      className={`rounded-[24px] border bg-card p-5 shadow-card transition-smooth ${index === currentQuestion && !submitted ? 'border-primary shadow-elegant' : 'border-border'} ${isCorrect ? 'border-success bg-success/5' : ''} ${isWrong ? 'border-destructive bg-destructive/5' : ''} ${submitted ? 'cursor-pointer hover:border-primary/40' : ''}`}
                     >
-                      <div className="mb-4 flex items-start gap-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full gradient-primary text-sm font-bold text-primary-foreground">{question.id || index + 1}</div>
-                        <h3 className="pt-1 text-sm font-medium leading-6">{getQuestionText(question)}</h3>
+                      <div className="mb-4 flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full gradient-primary text-sm font-bold text-primary-foreground">{question.id || index + 1}</div>
+                          <h3 className="pt-1 text-sm font-medium leading-6">{getQuestionText(question)}</h3>
+                        </div>
+                        {submitted && (
+                          <div className="mt-1 shrink-0 text-muted-foreground transition-transform">
+                            {expandedExplanations[questionKey] ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                          </div>
+                        )}
                       </div>
+
 
                       <div className="grid gap-2 sm:grid-cols-2">
                         {normalizeOptions(question).map((option, optionIndex) => {
@@ -630,6 +756,51 @@ function ExerciseAttemptPage() {
                           );
                         })}
                       </div>
+
+                      {/* AI Explanation Box */}
+                      {submitted && expandedExplanations[questionKey] && (
+                        <div className="mt-5 rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:p-5 animate-in slide-in-from-top-2 fade-in-50 duration-200">
+                          <div className="mb-4 flex items-center gap-2 text-sm font-bold text-primary">
+                            <Sparkles className="h-4 w-4" />
+                            AI Giải thích
+                          </div>
+                          
+                          {readingExplainLoadings[questionKey] ? (
+                            <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+                              <Loader2 className="h-6 w-6 animate-spin text-primary mb-2" />
+                              <span className="text-sm">AI đang phân tích...</span>
+                            </div>
+                          ) : readingExplanations[questionKey] ? (
+                            <div className="space-y-4 text-sm leading-6">
+                              <div>
+                                <div className="font-semibold text-foreground">Giải thích (Trích dẫn):</div>
+                                <div className="text-muted-foreground italic border-l-2 border-primary/40 pl-3 mt-1">"{readingExplanations[questionKey].explanation}"</div>
+                              </div>
+                              
+                              <div>
+                                <div className="font-semibold text-foreground">Phân tích đáp án đúng:</div>
+                                <div className="text-foreground/90 mt-1"><span className="font-medium text-success">{readingExplanations[questionKey].correct_answer}</span></div>
+                              </div>
+
+                              {isWrong && readingExplanations[questionKey].why_others_wrong && (
+                                <div>
+                                  <div className="font-semibold text-destructive">Vì sao bạn sai:</div>
+                                  <div className="text-foreground/90 mt-1">{readingExplanations[questionKey].why_others_wrong}</div>
+                                </div>
+                              )}
+
+                              {readingExplanations[questionKey].strategy_tip && (
+                                <div>
+                                  <div className="font-semibold text-amber-600 dark:text-amber-400">Mẹo làm bài:</div>
+                                  <div className="text-foreground/90 mt-1">{readingExplanations[questionKey].strategy_tip}</div>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-muted-foreground">Không tải được lời giải.</div>
+                          )}
+                        </div>
+                      )}
                     </article>
                   );
                 })}
