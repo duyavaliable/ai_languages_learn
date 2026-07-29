@@ -470,7 +470,7 @@ export default function SpeakingPracticePanel({ title, question, apiPrefix = '/a
                   onClick={toggleRecording}
                   className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold shadow-elegant transition-smooth ${
                     isRecording
-                      ? 'bg-destructive text-white'
+                      ? 'bg-destructive text-[#ffffff]'
                       : 'gradient-primary text-primary-foreground'
                   }`}
                 >
@@ -522,10 +522,10 @@ export default function SpeakingPracticePanel({ title, question, apiPrefix = '/a
                   type="button"
                   onClick={generateFeedback}
                   disabled={assessmentLoading || !modelScript || !finalTranscript.trim()}
-                  className="inline-flex items-center gap-2 rounded-full bg-green-600 px-4 py-2.5 text-sm font-semibold text-white transition-smooth hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center gap-2 rounded-full bg-green-600 px-4 py-2.5 text-sm font-semibold text-[#ffffff] transition-smooth hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {assessmentLoading
-                    ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  {assessmentLoading 
+                    ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#ffffff] border-t-transparent" />
                     : <Sparkles className="h-4 w-4" />}
                   Tạo phản hồi
                 </button>

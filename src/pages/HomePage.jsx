@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import DashboardLayout from '../components/dashboard/DashboardLayout';
 
@@ -8,10 +8,19 @@ function HomePage() {
   const [exercises, setExercises] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const location = useLocation();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSkill, setSelectedSkill] = useState('');
+  const [selectedSkill, setSelectedSkill] = useState(location.state?.selectedSkill || '');
   const [selectedLanguage, setSelectedLanguage] = useState('english');
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+
+  useEffect(() => {
+    if (location.state?.selectedSkill) {
+      setSelectedSkill(location.state.selectedSkill);
+      // Clean up the state so it doesn't persist on reload
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   useEffect(() => {
     api.get('/exercises')

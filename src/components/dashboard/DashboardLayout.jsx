@@ -9,6 +9,7 @@ import OverallProgress from './OverallProgress';
 import ExercisePanel from './ExercisePanel';
 
 export default function DashboardLayout({
+  children,
   // State
   exercises,
   filteredExercises,
@@ -30,7 +31,7 @@ export default function DashboardLayout({
   const isExerciseMode = Boolean(selectedSkill);
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-800 flex">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex">
       {/* Sidebar */}
       <Sidebar
         selectedSkill={selectedSkill}
@@ -52,45 +53,47 @@ export default function DashboardLayout({
 
         {/* Dashboard Content Container */}
         <div className="p-8 max-w-7xl w-full mx-auto space-y-8 flex-1">
-          {!isExerciseMode ? (
-            /* OVERVIEW MODE */
-            <>
-              {/* Hero Section Banner */}
-              <HeroBanner
-                onContinueLearning={() => {
-                  onSelectSkill('reading');
-                }}
+          {children ? children : (
+            !isExerciseMode ? (
+              /* OVERVIEW MODE */
+              <>
+                {/* Hero Section Banner */}
+                <HeroBanner
+                  onContinueLearning={() => {
+                    onSelectSkill('reading');
+                  }}
+                />
+  
+                {/* Statistics Grid */}
+                <StatsCards />
+  
+                {/* Quick Access & Weekly Progress / Overall Progress split */}
+                <div className="grid grid-cols-12 gap-8">
+                  {/* Left Column: Quick Access & Weekly Progress */}
+                  <div className="col-span-12 lg:col-span-8 space-y-8">
+                    <QuickAccess onSelectSkill={onSelectSkill} />
+                    <WeeklyProgress />
+                  </div>
+  
+                  {/* Right Column: Overall Progress */}
+                  <div className="col-span-12 lg:col-span-4 space-y-8">
+                    <OverallProgress />
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* EXERCISE MODE */
+              <ExercisePanel
+                selectedSkill={selectedSkill}
+                filteredExercises={filteredExercises}
+                loading={loading}
+                error={error}
+                searchQuery={searchQuery}
+                onSearchChange={onSearchChange}
+                onOpenExercise={onOpenExercise}
+                onBackToOverview={onResetOverview}
               />
-
-              {/* Statistics Grid */}
-              <StatsCards />
-
-              {/* Quick Access & Weekly Progress / Overall Progress split */}
-              <div className="grid grid-cols-12 gap-8">
-                {/* Left Column: Quick Access & Weekly Progress */}
-                <div className="col-span-12 lg:col-span-8 space-y-8">
-                  <QuickAccess onSelectSkill={onSelectSkill} />
-                  <WeeklyProgress />
-                </div>
-
-                {/* Right Column: Overall Progress */}
-                <div className="col-span-12 lg:col-span-4 space-y-8">
-                  <OverallProgress />
-                </div>
-              </div>
-            </>
-          ) : (
-            /* EXERCISE MODE */
-            <ExercisePanel
-              selectedSkill={selectedSkill}
-              filteredExercises={filteredExercises}
-              loading={loading}
-              error={error}
-              searchQuery={searchQuery}
-              onSearchChange={onSearchChange}
-              onOpenExercise={onOpenExercise}
-              onBackToOverview={onResetOverview}
-            />
+            )
           )}
         </div>
       </main>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Search,
   Flame,
@@ -9,19 +9,37 @@ import {
   Users,
   LibraryBig,
   Palette,
-  Globe
+  Globe,
+  User,
+  Sun
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useTheme } from '../../contexts/ThemeProvider';
 
 export default function Topbar({
-  searchQuery,
-  onSearchChange,
-  selectedLanguage,
-  onLanguageChange,
+  searchQuery = '',
+  onSearchChange = () => {},
+  selectedLanguage = 'english',
+  onLanguageChange = () => {},
   user,
-  onLogout
+  onLogout = () => {}
 }) {
   const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [dropdownRef]);
 
   const getInitials = (name) => {
     if (!name) return 'MT';
@@ -95,8 +113,11 @@ export default function Topbar({
 
         {/* Dark Mode & Notifications */}
         <div className="flex items-center gap-2">
-          <button className="p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-50 transition-colors">
-            <Moon className="w-5 h-5" />
+          <button 
+            onClick={toggleTheme}
+            className="p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-50 transition-colors"
+          >
+            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
           </button>
           <button className="p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-50 transition-colors relative">
             <Bell className="w-5 h-5" />
@@ -104,21 +125,44 @@ export default function Topbar({
           </button>
         </div>
 
-        {/* User Profile Avatar & Logout */}
-        <div className="flex items-center gap-3">
-          <div
-            className="w-10 h-10 bg-indigo-100 text-indigo-700 font-bold rounded-full flex items-center justify-center text-sm shadow-inner"
+        {/* User Profile Avatar & Dropdown */}
+        <div className="relative" ref={dropdownRef}>
+          <button
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            className="w-10 h-10 bg-indigo-100 text-indigo-700 font-bold rounded-full flex items-center justify-center text-sm shadow-inner hover:ring-2 hover:ring-indigo-300 transition-all focus:outline-none"
             title={user?.username || 'User'}
           >
             {getInitials(user?.username)}
-          </div>
-          <button
-            onClick={onLogout}
-            title="Đăng xuất"
-            className="p-2 text-slate-400 hover:text-red-600 rounded-full hover:bg-red-50 transition-colors"
-          >
-            <LogOut className="w-5 h-5" />
           </button>
+
+          {isDropdownOpen && (
+            <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-50 overflow-hidden transform opacity-100 scale-100 transition-all origin-top-right">
+              <div className="px-4 py-2.5 border-b border-slate-100 mb-1">
+                <p className="text-sm font-semibold text-slate-800 truncate">{user?.username || 'User'}</p>
+                <p className="text-xs text-slate-500 truncate">{user?.email || 'user@example.com'}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  navigate('/profile');
+                }}
+                className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-indigo-600 flex items-center gap-2.5 transition-colors"
+              >
+                <User className="w-4 h-4" />
+                <span className="font-medium">View Profile</span>
+              </button>
+              <button
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  onLogout();
+                }}
+                className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-red-50 hover:text-red-600 flex items-center gap-2.5 transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+                <span className="font-medium">Log out</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>

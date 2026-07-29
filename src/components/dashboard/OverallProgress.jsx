@@ -22,7 +22,7 @@ export default function OverallProgress() {
       <div className="space-y-5">
         <div>
           <div className="flex justify-between text-sm font-bold mb-2">
-            <span className="text-slate-600">English (IELTS)</span>
+            <span className="text-slate-600">English </span>
             <span className="text-slate-900">0%</span>
           </div>
           <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">

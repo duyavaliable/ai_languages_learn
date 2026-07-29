@@ -32,7 +32,7 @@ export default function WeeklyProgress() {
           {weekDays.map((item, idx) => (
             <div key={idx} className="flex-1 flex flex-col items-center gap-2 group relative">
               {/* Tooltip */}
-              <div className="absolute -top-9 bg-slate-800 text-white text-[10px] py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10 shadow">
+              <div className="absolute -top-9 bg-slate-800 text-[#ffffff] text-[10px] py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10 shadow">
                 {item.label}
               </div>
               {/* Bar */}

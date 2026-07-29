@@ -33,6 +33,59 @@
     --shadow-card: 0 1px 3px hsl(222 47% 11% / 0.06), 0 1px 2px hsl(222 47% 11% / 0.04);
     --shadow-card-hover: 0 10px 25px -5px hsl(222 47% 11% / 0.1), 0 8px 10px -6px hsl(222 47% 11% / 0.06);
     --shadow-sticky: 0 4px 12px hsl(222 47% 11% / 0.08);
+    --shadow-sticky: 0 4px 12px hsl(222 47% 11% / 0.08);
+
+    /* Primitive Colors mapped to variables for Theme support */
+    --color-white: #ffffff;
+    --color-slate-50: #f8fafc;
+    --color-slate-100: #f1f5f9;
+    --color-slate-200: #e2e8f0;
+    --color-slate-300: #cbd5e1;
+    --color-slate-400: #94a3b8;
+    --color-slate-500: #64748b;
+    --color-slate-600: #475569;
+    --color-slate-700: #334155;
+    --color-slate-800: #1e293b;
+    --color-slate-900: #0f172a;
+  }
+
+  .dark {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 11%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 11%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+    --success: 152 60% 42%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    /* Inverted Primitives for Dark Mode */
+    --color-white: #0f172a; /* Same as slate-900 */
+    --color-slate-50: #1e293b; /* Same as slate-800 */
+    --color-slate-100: #334155; /* Same as slate-700 */
+    --color-slate-200: #475569; /* Same as slate-600 */
+    --color-slate-300: #64748b; /* Same as slate-500 */
+    --color-slate-400: #94a3b8; /* Same as slate-400 */
+    --color-slate-500: #cbd5e1; /* Same as slate-300 */
+    --color-slate-600: #e2e8f0; /* Same as slate-200 */
+    --color-slate-700: #f1f5f9; /* Same as slate-100 */
+    --color-slate-800: #f8fafc; /* Same as slate-50 */
+    --color-slate-900: #ffffff; /* Same as white */
   }
 
   * {

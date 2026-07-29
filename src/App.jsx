@@ -12,6 +12,7 @@ import AdminAccountManager from "./pages/AdminAccountManager.jsx"
 import AdminContentManager from "./pages/AdminContentManager.jsx"
 import TeacherCreateContent from "./pages/TeacherCreateContent.jsx"
 import UnauthorizedPage from "./pages/Unauthorized.jsx"
+import ProfilePage from "./pages/ProfilePage.jsx"
 
 function App() {
   return (
@@ -70,6 +71,15 @@ function App() {
           element={
             <PrivateRoute allowedRoles={["teacher"]}>
               <TeacherCreateContent />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/profile"
+          element={
+            <PrivateRoute>
+              <ProfilePage />
             </PrivateRoute>
           }
         />
