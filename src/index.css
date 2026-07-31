@@ -47,6 +47,38 @@
     --color-slate-700: #334155;
     --color-slate-800: #1e293b;
     --color-slate-900: #0f172a;
+
+    /* --- Admin Theme Namespace --- */
+    --admin-background: #f6f8fb;
+    --admin-foreground: #0f172a;
+    --admin-card: #ffffff;
+    --admin-card-foreground: #0f172a;
+    --admin-muted: #f1f5f9;
+    --admin-muted-foreground: #64748b;
+    --admin-border: #e6eaf0;
+    --admin-input: #e6eaf0;
+    --admin-ring: #2563eb;
+    --admin-primary: #2563eb;
+    --admin-primary-foreground: #ffffff;
+    --admin-primary-soft: #eaf0ff;
+    --admin-accent: #f1f5f9;
+    --admin-accent-foreground: #0f172a;
+    --admin-success: #16a34a;
+    --admin-success-foreground: #ffffff;
+    --admin-success-soft: #dcfce7;
+    --admin-warning: #d97706;
+    --admin-warning-foreground: #ffffff;
+    --admin-warning-soft: #fef3c7;
+    --admin-danger: #dc2626;
+    --admin-danger-foreground: #ffffff;
+    --admin-danger-soft: #fee2e2;
+    --admin-teal: #0d9488;
+    --admin-teal-soft: #d5f5f0;
+    --admin-radius: 0.875rem;
+    --admin-radius-sm: 0.5rem;
+    --admin-radius-lg: 1.25rem;
+    --admin-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.05);
+    --admin-shadow-pop: 0 8px 30px rgba(15, 23, 42, 0.12);
   }
 
   .dark {
@@ -86,6 +118,27 @@
     --color-slate-700: #f1f5f9; /* Same as slate-100 */
     --color-slate-800: #f8fafc; /* Same as slate-50 */
     --color-slate-900: #ffffff; /* Same as white */
+
+    /* --- Admin Theme Dark Namespace --- */
+    --admin-background: #0b1220;
+    --admin-foreground: #e6eaf2;
+    --admin-card: #131b2c;
+    --admin-card-foreground: #e6eaf2;
+    --admin-muted: #1a2436;
+    --admin-muted-foreground: #94a3b8;
+    --admin-border: #26324a;
+    --admin-input: #26324a;
+    --admin-primary: #3b82f6;
+    --admin-primary-foreground: #ffffff;
+    --admin-primary-soft: #1c2c4d;
+    --admin-accent: #1a2436;
+    --admin-accent-foreground: #e6eaf2;
+    --admin-success-soft: #10331f;
+    --admin-warning-soft: #3a2a0d;
+    --admin-danger-soft: #3a1616;
+    --admin-teal-soft: #0e2e2a;
+    --admin-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+    --admin-shadow-pop: 0 8px 30px rgba(0, 0, 0, 0.45);
   }
 
   * {

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useNavigate, Link, replace } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
+import { Mail, Lock, Loader2, Sparkles, ArrowRight } from 'lucide-react';
 import api from '../services/api';
 
 function LoginPage() {
@@ -10,6 +11,7 @@ function LoginPage() {
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+    if (error) setError('');
   };
 
   const handleSubmit = async (e) => {
@@ -27,140 +29,110 @@ function LoginPage() {
       }));
       navigate('/?lang=english', { replace: true });
     } catch (err) {
-      setError(err.response?.data?.message || 'Đăng nhập thất bại');
+      setError(err.response?.data?.message || 'Đăng nhập thất bại. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <h2 style={styles.title}>🌏 Đăng nhập</h2>
-        <p style={styles.subtitle}>Chào mừng bạn quay lại!</p>
+    <div className="min-h-screen flex items-center justify-center bg-background p-4 sm:p-8">
+      {/* Background Decorative Elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 rounded-full blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-accent/20 rounded-full blur-[120px]" />
+      </div>
 
-        {error && <div style={styles.error}>{error}</div>}
+      <div className="w-full max-w-[420px] bg-card rounded-[1.5rem] shadow-shadow-elegant border border-border p-8 relative z-10 animate-fade-in">
+        <div className="flex flex-col items-center mb-8">
+          <div className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center text-primary-foreground shadow-shadow-glow mb-6">
+            <Sparkles className="w-7 h-7" />
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-card-foreground tracking-tight text-center">
+            Chào mừng trở lại
+          </h1>
+          <p className="text-muted-foreground mt-2 text-center text-sm sm:text-base">
+            Vui lòng đăng nhập để tiếp tục học tập
+          </p>
+        </div>
 
-        <form onSubmit={handleSubmit}>
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Email</label>
-            <input
-              type="email"
-              name="email"
-              value={form.email}
-              onChange={handleChange}
-              placeholder="Nhập email của bạn"
-              style={styles.input}
-              required
-            />
+        {error && (
+          <div className="bg-destructive/10 border border-destructive/20 text-destructive text-sm font-medium px-4 py-3 rounded-xl mb-6 animate-in slide-in-from-top-2">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="space-y-1.5">
+            <label className="text-sm font-semibold text-card-foreground">Email</label>
+            <div className="relative">
+              <span className="absolute inset-y-0 left-4 flex items-center text-muted-foreground pointer-events-none">
+                <Mail className="w-5 h-5" />
+              </span>
+              <input
+                type="email"
+                name="email"
+                value={form.email}
+                onChange={handleChange}
+                placeholder="Nhập email của bạn"
+                className="w-full pl-11 pr-4 py-3 bg-background border border-border rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-muted-foreground"
+                required
+              />
+            </div>
           </div>
 
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Mật khẩu</label>
-            <input
-              type="password"
-              name="password"
-              value={form.password}
-              onChange={handleChange}
-              placeholder="Nhập mật khẩu"
-              style={styles.input}
-              required
-            />
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-semibold text-card-foreground">Mật khẩu</label>
+              <Link to="#" className="text-xs font-medium text-primary hover:text-primary/80 transition-colors">
+                Quên mật khẩu?
+              </Link>
+            </div>
+            <div className="relative">
+              <span className="absolute inset-y-0 left-4 flex items-center text-muted-foreground pointer-events-none">
+                <Lock className="w-5 h-5" />
+              </span>
+              <input
+                type="password"
+                name="password"
+                value={form.password}
+                onChange={handleChange}
+                placeholder="Nhập mật khẩu"
+                className="w-full pl-11 pr-4 py-3 bg-background border border-border rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-muted-foreground"
+                required
+              />
+            </div>
           </div>
 
-          <button type="submit" style={styles.button} disabled={loading}>
-            {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 py-3 px-4 gradient-primary text-primary-foreground font-semibold rounded-xl hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-70 disabled:cursor-not-allowed mt-2 shadow-shadow-glow"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Đang đăng nhập...
+              </>
+            ) : (
+              <>
+                Đăng nhập <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </form>
 
-        <p style={styles.link}>
-          Chưa có tài khoản?{' '}
-          <Link to="/register" style={styles.linkText}>Đăng ký ngay</Link>
-        </p>
+        <div className="mt-8 pt-6 border-t border-border text-center">
+          <p className="text-sm text-muted-foreground">
+            Chưa có tài khoản?{' '}
+            <Link to="/register" className="font-semibold text-primary hover:text-primary/80 transition-colors">
+              Đăng ký ngay
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    minHeight: '100vh',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    fontFamily: 'sans-serif'
-  },
-  card: {
-    background: '#fff',
-    padding: '40px',
-    borderRadius: '12px',
-    boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
-    width: '100%',
-    maxWidth: '400px'
-  },
-  title: {
-    textAlign: 'center',
-    marginBottom: '8px',
-    color: '#333',
-    fontSize: '24px'
-  },
-  subtitle: {
-    textAlign: 'center',
-    color: '#888',
-    marginBottom: '24px'
-  },
-  error: {
-    background: '#fff0f0',
-    color: '#e53e3e',
-    padding: '10px 14px',
-    borderRadius: '6px',
-    marginBottom: '16px',
-    border: '1px solid #fed7d7',
-    fontSize: '14px'
-  },
-  formGroup: {
-    marginBottom: '16px'
-  },
-  label: {
-    display: 'block',
-    marginBottom: '6px',
-    fontWeight: '600',
-    color: '#555',
-    fontSize: '14px'
-  },
-  input: {
-    width: '100%',
-    padding: '10px 14px',
-    border: '1px solid #ddd',
-    borderRadius: '6px',
-    fontSize: '14px',
-    outline: 'none',
-    boxSizing: 'border-box'
-  },
-  button: {
-    width: '100%',
-    padding: '12px',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
-    fontSize: '15px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    marginTop: '8px'
-  },
-  link: {
-    textAlign: 'center',
-    marginTop: '20px',
-    color: '#888',
-    fontSize: '14px'
-  },
-  linkText: {
-    color: '#667eea',
-    fontWeight: '600',
-    textDecoration: 'none'
-  }
-};
 
 export default LoginPage;

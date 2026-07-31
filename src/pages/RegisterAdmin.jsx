@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { User, Mail, Lock, Loader2, ShieldAlert, ArrowRight } from 'lucide-react';
 import api from '../services/api';
 
 function RegisterAdminPage() {
@@ -14,6 +15,7 @@ function RegisterAdminPage() {
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+    if (error) setError('');
   };
 
   const handleSubmit = async (e) => {
@@ -31,149 +33,116 @@ function RegisterAdminPage() {
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <h2 style={styles.title}>Đăng ký Admin</h2>
-        <p style={styles.subtitle}>Trang đăng ký dành cho quản trị viên</p>
+    <div className="min-h-screen flex items-center justify-center bg-background p-4 sm:p-8">
+      {/* Background Decorative Elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-destructive/20 rounded-full blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-warning/20 rounded-full blur-[120px]" />
+      </div>
 
-        {error && <div style={styles.error}>{error}</div>}
+      <div className="w-full max-w-[420px] bg-card rounded-[1.5rem] shadow-shadow-elegant border border-border p-8 relative z-10 animate-fade-in">
+        <div className="flex flex-col items-center mb-8">
+          <div className="w-14 h-14 bg-destructive rounded-2xl flex items-center justify-center text-destructive-foreground shadow-shadow-glow mb-6">
+            <ShieldAlert className="w-7 h-7" />
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-card-foreground tracking-tight text-center">
+            Đăng ký Admin
+          </h1>
+          <p className="text-muted-foreground mt-2 text-center text-sm sm:text-base">
+            Trang đăng ký dành cho quản trị viên hệ thống
+          </p>
+        </div>
 
-        <form onSubmit={handleSubmit}>
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Tên người dùng</label>
-            <input
-              type="text"
-              name="username"
-              value={form.username}
-              onChange={handleChange}
-              placeholder="Nhập tên người dùng"
-              style={styles.input}
-              required
-            />
+        {error && (
+          <div className="bg-destructive/10 border border-destructive/20 text-destructive text-sm font-medium px-4 py-3 rounded-xl mb-6 animate-in slide-in-from-top-2">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="space-y-1.5">
+            <label className="text-sm font-semibold text-card-foreground">Tên người dùng</label>
+            <div className="relative">
+              <span className="absolute inset-y-0 left-4 flex items-center text-muted-foreground pointer-events-none">
+                <User className="w-5 h-5" />
+              </span>
+              <input
+                type="text"
+                name="username"
+                value={form.username}
+                onChange={handleChange}
+                placeholder="Nhập tên người dùng"
+                className="w-full pl-11 pr-4 py-3 bg-background border border-border rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-destructive/20 focus:border-destructive transition-all placeholder:text-muted-foreground"
+                required
+              />
+            </div>
           </div>
 
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Email</label>
-            <input
-              type="email"
-              name="email"
-              value={form.email}
-              onChange={handleChange}
-              placeholder="Nhập email"
-              style={styles.input}
-              required
-            />
+          <div className="space-y-1.5">
+            <label className="text-sm font-semibold text-card-foreground">Email</label>
+            <div className="relative">
+              <span className="absolute inset-y-0 left-4 flex items-center text-muted-foreground pointer-events-none">
+                <Mail className="w-5 h-5" />
+              </span>
+              <input
+                type="email"
+                name="email"
+                value={form.email}
+                onChange={handleChange}
+                placeholder="Nhập email của bạn"
+                className="w-full pl-11 pr-4 py-3 bg-background border border-border rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-destructive/20 focus:border-destructive transition-all placeholder:text-muted-foreground"
+                required
+              />
+            </div>
           </div>
 
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Mật khẩu</label>
-            <input
-              type="password"
-              name="password"
-              value={form.password}
-              onChange={handleChange}
-              placeholder="Nhập mật khẩu"
-              style={styles.input}
-              required
-            />
+          <div className="space-y-1.5">
+            <label className="text-sm font-semibold text-card-foreground">Mật khẩu</label>
+            <div className="relative">
+              <span className="absolute inset-y-0 left-4 flex items-center text-muted-foreground pointer-events-none">
+                <Lock className="w-5 h-5" />
+              </span>
+              <input
+                type="password"
+                name="password"
+                value={form.password}
+                onChange={handleChange}
+                placeholder="Nhập mật khẩu"
+                className="w-full pl-11 pr-4 py-3 bg-background border border-border rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-destructive/20 focus:border-destructive transition-all placeholder:text-muted-foreground"
+                required
+              />
+            </div>
           </div>
 
-          <button type="submit" style={styles.button} disabled={loading}>
-            {loading ? 'Đang đăng ký...' : 'Đăng ký Admin'}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-destructive text-destructive-foreground font-semibold rounded-xl hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-destructive/30 disabled:opacity-70 disabled:cursor-not-allowed mt-4 shadow-shadow-glow"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Đang xử lý...
+              </>
+            ) : (
+              <>
+                Đăng ký Admin <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </form>
 
-        <p style={styles.link}>
-          Đã có tài khoản?{' '}
-          <Link to="/login" style={styles.linkText}>Đăng nhập</Link>
-        </p>
-
+        <div className="mt-8 pt-6 border-t border-border text-center">
+          <p className="text-sm text-muted-foreground">
+            Đã có tài khoản?{' '}
+            <Link to="/login" className="font-semibold text-destructive hover:text-destructive/80 transition-colors">
+              Đăng nhập
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    minHeight: '100vh',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'linear-gradient(140deg, #7f1d1d 0%, #b91c1c 45%, #fb923c 100%)',
-    fontFamily: 'sans-serif',
-    padding: '20px'
-  },
-  card: {
-    width: '100%',
-    maxWidth: '420px',
-    background: '#ffffff',
-    borderRadius: '14px',
-    padding: '34px 30px',
-    boxShadow: '0 14px 40px rgba(0,0,0,0.24)'
-  },
-  title: {
-    margin: 0,
-    textAlign: 'center',
-    color: '#0f172a',
-    fontSize: '26px'
-  },
-  subtitle: {
-    textAlign: 'center',
-    color: '#64748b',
-    marginTop: '8px',
-    marginBottom: '24px'
-  },
-  error: {
-    background: '#fff1f2',
-    color: '#b91c1c',
-    border: '1px solid #fecdd3',
-    borderRadius: '8px',
-    padding: '10px 12px',
-    marginBottom: '14px',
-    fontSize: '14px'
-  },
-  formGroup: {
-    marginBottom: '14px'
-  },
-  label: {
-    display: 'block',
-    marginBottom: '6px',
-    color: '#334155',
-    fontWeight: 600,
-    fontSize: '14px'
-  },
-  input: {
-    width: '100%',
-    border: '1px solid #cbd5e1',
-    borderRadius: '8px',
-    padding: '11px 12px',
-    fontSize: '14px',
-    outline: 'none',
-    boxSizing: 'border-box'
-  },
-  button: {
-    width: '100%',
-    marginTop: '8px',
-    border: 'none',
-    borderRadius: '8px',
-    padding: '12px',
-    color: '#ffffff',
-    fontWeight: 700,
-    fontSize: '15px',
-    cursor: 'pointer',
-    background: 'linear-gradient(120deg, #b91c1c 0%, #f97316 100%)'
-  },
-  link: {
-    textAlign: 'center',
-    marginTop: '18px',
-    marginBottom: 0,
-    color: '#64748b'
-  },
-  linkText: {
-    color: '#b91c1c',
-    fontWeight: 700,
-    textDecoration: 'none'
-  }
-};
 
 export default RegisterAdminPage;

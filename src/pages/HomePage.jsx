@@ -15,6 +15,12 @@ function HomePage() {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
   useEffect(() => {
+    if (user?.role === 'admin') {
+      navigate('/admin', { replace: true });
+    }
+  }, [user, navigate]);
+
+  useEffect(() => {
     if (location.state?.selectedSkill) {
       setSelectedSkill(location.state.selectedSkill);
       // Clean up the state so it doesn't persist on reload

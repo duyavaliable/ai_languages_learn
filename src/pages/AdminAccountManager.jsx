@@ -1,26 +1,67 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import {
+  Users,
+  UserCheck,
+  ShieldCheck,
+  GraduationCap,
+  Plus,
+  Lock,
+  Unlock,
+  Trash2,
+  RotateCcw,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
+import PageHeader from '../components/admin/ui/PageHeader';
+import StatCard from '../components/admin/ui/StatCard';
+import StatusBadge from '../components/admin/ui/StatusBadge';
+import EmptyState from '../components/admin/ui/EmptyState';
+import LoadingScreen from '../components/admin/ui/LoadingScreen';
+import Modal from '../components/admin/ui/Modal';
+import ConfirmDialog from '../components/admin/ui/ConfirmDialog';
 
 const ROLES = ['student', 'teacher', 'admin'];
+
+function roleTone(role) {
+  if (role === "admin") return "danger"
+  if (role === "teacher") return "teal"
+  return "primary"
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-sm font-medium text-admin-card-foreground">{label}</span>
+      {children}
+    </label>
+  )
+}
 
 function AdminAccountManager() {
   const navigate = useNavigate();
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
   const [users, setUsers] = useState([]);
+  const [deletedUsers, setDeletedUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
+  const [deletedLoading, setDeletedLoading] = useState(false);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [createForm, setCreateForm] = useState({ username: '', email: '', password: '', role: 'student' });
-  const [createError, setCreateError] = useState(null);
-  const [createSuccess, setCreateSuccess] = useState(null);
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [creating, setCreating] = useState(false);
+
+  const [createForm, setCreateForm] = useState({
+    username: "",
+    email: "",
+    password: "",
+    role: "student",
+  });
 
   const [actionMsg, setActionMsg] = useState(null);
-  const [showDeleted, setShowDeleted] = useState(false);
-  const [deletedUsers, setDeletedUsers] = useState([]);
-  const [deletedLoading, setDeletedLoading] = useState(false);
+  const [confirm, setConfirm] = useState(null);
 
   const fetchUsers = () => {
     setLoading(true);
@@ -36,6 +77,16 @@ function AdminAccountManager() {
       });
   };
 
+  const fetchDeletedUsers = () => {
+    setDeletedLoading(true);
+    api.get('/users/deleted')
+      .then(res => {
+        setDeletedUsers(res.data);
+        setDeletedLoading(false);
+      })
+      .catch(() => setDeletedLoading(false));
+  };
+
   useEffect(() => {
     if (currentUser.role !== 'admin') {
       navigate('/');
@@ -44,17 +95,32 @@ function AdminAccountManager() {
     fetchUsers();
   }, []);
 
+  const stats = useMemo(() => {
+    const total = users.length;
+    const active = users.filter((u) => u.is_active).length;
+    const teachers = users.filter((u) => u.role === "teacher").length;
+    const admins = users.filter((u) => u.role === "admin").length;
+    return { total, active, teachers, admins };
+  }, [users]);
+
+  // Logic Handlers
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
-    setCreateError(null);
-    setCreateSuccess(null);
+    if (!createForm.username || !createForm.email || !createForm.password) {
+      setActionMsg({ type: 'error', text: 'Vui lòng nhập đầy đủ thông tin' });
+      return;
+    }
+    setCreating(true);
     try {
       await api.post('/users', createForm);
-      setCreateSuccess('Tạo tài khoản thành công!');
+      setActionMsg({ type: 'success', text: 'Tạo tài khoản thành công!' });
       setCreateForm({ username: '', email: '', password: '', role: 'student' });
+      setShowCreateForm(false);
       fetchUsers();
     } catch (err) {
-      setCreateError(err.response?.data?.message || 'Tạo tài khoản thất bại');
+      setActionMsg({ type: 'error', text: err.response?.data?.message || 'Tạo tài khoản thất bại' });
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -80,20 +146,23 @@ function AdminAccountManager() {
     }
   };
 
-  const fetchDeletedUsers = () => {
-    setDeletedLoading(true);
-    api.get('/users/deleted')
-      .then(res => {
-        setDeletedUsers(res.data);
-        setDeletedLoading(false);
-      })
-      .catch(() => setDeletedLoading(false));
-  };
-
-  const handleToggleDeletedList = () => {
-    const next = !showDeleted;
-    setShowDeleted(next);
-    if (next) fetchDeletedUsers();
+  const handleSoftDelete = (userId, username) => {
+    setConfirm({
+      title: "Xóa tài khoản?",
+      description: `Bạn có chắc muốn xóa mềm tài khoản "${username}"? Tài khoản sẽ được chuyển vào danh sách đã xóa.`,
+      confirmLabel: "Xóa mềm",
+      onConfirm: async () => {
+        setConfirm(null);
+        try {
+          await api.delete(`/users/${userId}`);
+          setUsers(prev => prev.filter(u => u.id !== userId));
+          setActionMsg({ type: 'success', text: `Đã xóa tài khoản "${username}"` });
+          if (showDeleted) fetchDeletedUsers();
+        } catch (err) {
+          setActionMsg({ type: 'error', text: err.response?.data?.message || 'Xóa tài khoản thất bại' });
+        }
+      },
+    });
   };
 
   const handleRestore = async (userId, username) => {
@@ -108,504 +177,289 @@ function AdminAccountManager() {
     }
   };
 
-  const handleSoftDelete = async (userId, username) => {
-    if (!window.confirm(`Xóa tài khoản "${username}"? Tài khoản sẽ bị ẩn khỏi danh sách nhưng vẫn còn trong cơ sở dữ liệu.`)) return;
-    setActionMsg(null);
-    try {
-      await api.delete(`/users/${userId}`);
-      setUsers(prev => prev.filter(u => u.id !== userId));
-      setActionMsg({ type: 'success', text: `Đã xóa tài khoản "${username}"` });
-    } catch (err) {
-      setActionMsg({ type: 'error', text: err.response?.data?.message || 'Xóa tài khoản thất bại' });
-    }
+  const handleToggleDeletedList = () => {
+    const next = !showDeleted;
+    setShowDeleted(next);
+    if (next) fetchDeletedUsers();
   };
 
-  const activeCount = users.filter((user) => user.is_active).length;
-  const teacherCount = users.filter((user) => user.role === 'teacher').length;
-  const adminCount = users.filter((user) => user.role === 'admin').length;
-
   return (
-    <div style={styles.wrapper}>
-      {/* Header */}
-      <div style={styles.header}>
-        <div style={styles.headerLeft}>
-          <button onClick={() => navigate('/')} style={styles.backBtn}>← Quay lại</button>
-          <span style={styles.logo}>Quản lý tài khoản</span>
+    <div>
+      <PageHeader
+        title="Quản lý tài khoản"
+        description="Quản lý người dùng, phân quyền và khôi phục tài khoản trên hệ thống Lingua."
+        actions={
+          <button
+            type="button"
+            onClick={() => setShowCreateForm(true)}
+            className="inline-flex items-center gap-2 rounded-admin-sm bg-admin-primary px-4 py-2.5 text-sm font-semibold text-admin-primary-foreground transition hover:brightness-95"
+          >
+            <Plus className="h-4 w-4" />
+            Tạo tài khoản
+          </button>
+        }
+      />
+
+      {/* Action message */}
+      {actionMsg && (
+        <div className={`mb-6 p-4 rounded-admin text-sm font-medium border ${
+          actionMsg.type === 'success' ? 'bg-admin-success-soft text-admin-success border-admin-success/20' : 'bg-admin-danger-soft text-admin-danger border-admin-danger/20'
+        }`}>
+          {actionMsg.text}
         </div>
-        <div style={styles.headerRight}>
-          <span style={styles.welcomeText}>
-            Admin: <strong>{currentUser.username}</strong>
-          </span>
-        </div>
+      )}
+
+      {/* Stats */}
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard icon={Users} label="Tổng tài khoản" value={stats.total} tone="primary" />
+        <StatCard icon={UserCheck} label="Đang hoạt động" value={stats.active} tone="success" />
+        <StatCard icon={GraduationCap} label="Teacher" value={stats.teachers} tone="teal" />
+        <StatCard icon={ShieldCheck} label="Admin" value={stats.admins} tone="warning" />
       </div>
 
-      <div style={styles.content}>
-        <section style={styles.heroCard}>
-          <div>
-            <p style={styles.heroEyebrow}>Admin dashboard</p>
-            <h1 style={styles.heroTitle}>Quản lý tài khoản</h1>
-            <p style={styles.heroDescription}>
-              Theo dõi trạng thái tài khoản, phân quyền và xử lý danh sách xóa mềm trong một bố cục rõ ràng, hiện đại.
-            </p>
+      {/* Deleted list toggle */}
+      <div className="mb-4">
+        <button
+          type="button"
+          onClick={handleToggleDeletedList}
+          className="inline-flex items-center gap-2 rounded-admin-sm border border-admin-border bg-admin-card px-4 py-2 text-sm font-semibold text-admin-card-foreground transition-colors hover:bg-admin-muted"
+        >
+          {showDeleted ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          Danh sách đã xóa mềm
+        </button>
+      </div>
+
+      {showDeleted ? (
+        <div className="mb-6 overflow-hidden rounded-admin border border-admin-border bg-admin-card shadow-admin-card">
+          <div className="border-b border-admin-border px-5 py-4">
+            <h2 className="text-sm font-bold text-admin-card-foreground">Tài khoản đã xóa mềm</h2>
           </div>
-          <div style={styles.heroStats}>
-            <div style={styles.statCard}>
-              <span style={styles.statLabel}>Tổng</span>
-              <strong style={styles.statValue}>{users.length}</strong>
-            </div>
-            <div style={styles.statCard}>
-              <span style={styles.statLabel}>Hoạt động</span>
-              <strong style={styles.statValue}>{activeCount}</strong>
-            </div>
-            <div style={styles.statCard}>
-              <span style={styles.statLabel}>Teacher</span>
-              <strong style={styles.statValue}>{teacherCount}</strong>
-            </div>
-            <div style={styles.statCard}>
-              <span style={styles.statLabel}>Admin</span>
-              <strong style={styles.statValue}>{adminCount}</strong>
-            </div>
-          </div>
-        </section>
-
-        {/* Top bar */}
-        <div style={styles.topBar}>
-          <h2 style={styles.sectionTitle}>Danh sách tài khoản ({users.length})</h2>
-          <button
-            onClick={() => { setShowCreateForm(!showCreateForm); setCreateError(null); setCreateSuccess(null); }}
-            style={styles.createBtn}
-          >
-            {showCreateForm ? '✕ Đóng form' : '+ Tạo tài khoản'}
-          </button>
-        </div>
-
-        {/* Create User Form */}
-        {showCreateForm && (
-          <div style={styles.createCard}>
-            <h3 style={styles.createTitle}>Tạo tài khoản mới</h3>
-            {createError && <p style={styles.errorText}>{createError}</p>}
-            {createSuccess && <p style={styles.successText}>{createSuccess}</p>}
-            <form onSubmit={handleCreateSubmit}>
-              <div style={styles.formRow}>
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>Tên đăng nhập</label>
-                  <input
-                    style={styles.input}
-                    value={createForm.username}
-                    onChange={e => setCreateForm(p => ({ ...p, username: e.target.value }))}
-                    placeholder="Nhập tên đăng nhập"
-                    required
-                  />
-                </div>
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>Email</label>
-                  <input
-                    style={styles.input}
-                    type="email"
-                    value={createForm.email}
-                    onChange={e => setCreateForm(p => ({ ...p, email: e.target.value }))}
-                    placeholder="Nhập email"
-                    required
-                  />
-                </div>
-              </div>
-              <div style={styles.formRow}>
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>Mật khẩu</label>
-                  <input
-                    style={styles.input}
-                    type="password"
-                    value={createForm.password}
-                    onChange={e => setCreateForm(p => ({ ...p, password: e.target.value }))}
-                    placeholder="Nhập mật khẩu"
-                    required
-                  />
-                </div>
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>Vai trò</label>
-                  <select
-                    style={styles.input}
-                    value={createForm.role}
-                    onChange={e => setCreateForm(p => ({ ...p, role: e.target.value }))}
-                  >
-                    {ROLES.map(r => (
-                      <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <button type="submit" style={styles.submitBtn}>Tạo tài khoản</button>
-            </form>
-          </div>
-        )}
-
-        {/* Deleted Users Toggle */}
-        <div style={styles.deletedSection}>
-          <button onClick={handleToggleDeletedList} style={styles.deletedToggleBtn}>
-            {showDeleted ? '▲ Ẩn danh sách đã xóa' : '▼ Xem danh sách đã xóa mềm'}
-            {!showDeleted && deletedUsers.length === 0 ? '' : ` (${deletedUsers.length})`}
-          </button>
-
-          {showDeleted && (
-            <div style={{ marginTop: '12px' }}>
-              {deletedLoading && <p style={styles.statusText}>Đang tải...</p>}
-              {!deletedLoading && deletedUsers.length === 0 && (
-                <p style={{ ...styles.statusText, padding: '16px', textAlign: 'left' }}>Không có tài khoản nào đã xóa.</p>
-              )}
-              {!deletedLoading && deletedUsers.length > 0 && (
-                <div style={styles.tableWrapper}>
-                  <table style={styles.table}>
-                    <thead>
-                      <tr style={{ ...styles.tableHeadRow, background: 'linear-gradient(135deg, #e53e3e 0%, #c05621 100%)' }}>
-                        <th style={styles.th}>ID</th>
-                        <th style={styles.th}>Tên đăng nhập</th>
-                        <th style={styles.th}>Email</th>
-                        <th style={styles.th}>Vai trò</th>
-                        <th style={styles.th}>Thao tác</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {deletedUsers.map(u => (
-                        <tr key={u.id} style={{ ...styles.tableRow, background: '#fff5f5' }}>
-                          <td style={styles.td}>{u.id}</td>
-                          <td style={{ ...styles.td, textDecoration: 'line-through', color: '#a0aec0' }}>{u.username}</td>
-                          <td style={{ ...styles.td, textDecoration: 'line-through', color: '#a0aec0' }}>{u.email}</td>
-                          <td style={styles.td}><span style={roleBadgeStyle(u.role)}>{u.role}</span></td>
-                          <td style={styles.td}>
-                            <button
-                              onClick={() => handleRestore(u.id, u.username)}
-                              style={styles.restoreBtn}
-                            >
-                              ♻️ Khôi phục
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+          {deletedLoading ? (
+            <div className="p-8 text-center text-admin-muted-foreground text-sm">Đang tải...</div>
+          ) : deletedUsers.length === 0 ? (
+            <EmptyState title="Không có tài khoản đã xóa" description="Các tài khoản bị xóa mềm sẽ hiển thị ở đây." />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-admin-border text-xs uppercase tracking-wider text-admin-muted-foreground">
+                    <th className="px-5 py-3 font-semibold">ID</th>
+                    <th className="px-5 py-3 font-semibold">Username</th>
+                    <th className="px-5 py-3 font-semibold">Email</th>
+                    <th className="px-5 py-3 font-semibold">Vai trò</th>
+                    <th className="px-5 py-3 text-right font-semibold">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deletedUsers.map((u) => (
+                    <tr key={u.id} className="border-b border-admin-border/60 last:border-0">
+                      <td className="px-5 py-3 text-admin-muted-foreground">{u.id}</td>
+                      <td className="px-5 py-3 font-medium text-admin-card-foreground">{u.username}</td>
+                      <td className="px-5 py-3 text-admin-muted-foreground">{u.email}</td>
+                      <td className="px-5 py-3">
+                        <StatusBadge tone={roleTone(u.role)}>{u.role}</StatusBadge>
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleRestore(u.id, u.username)}
+                          className="inline-flex items-center gap-1.5 rounded-admin-sm border border-admin-border bg-admin-card px-3 py-1.5 text-xs font-semibold text-admin-success transition-colors hover:bg-admin-success-soft"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          Khôi phục
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
+      ) : null}
 
-        {/* Action message */}
-        {actionMsg && (
-          <div style={actionMsg.type === 'success' ? styles.successBanner : styles.errorBanner}>
-            {actionMsg.text}
-          </div>
-        )}
+      {/* Main table */}
+      <div className="overflow-hidden rounded-admin border border-admin-border bg-admin-card shadow-admin-card">
+        <div className="flex items-center justify-between border-b border-admin-border px-5 py-4">
+          <h2 className="text-sm font-bold text-admin-card-foreground">Danh sách người dùng</h2>
+          <span className="text-xs font-medium text-admin-muted-foreground">{users.length} tài khoản</span>
+        </div>
 
-        {/* Users Table */}
-        {loading && <p style={styles.statusText}>Đang tải...</p>}
-        {fetchError && <p style={styles.errorText}>{fetchError}</p>}
-
-        {!loading && !fetchError && (
-          <div style={styles.tableWrapper}>
-            <table style={styles.table}>
+        {loading ? (
+          <LoadingScreen label="Đang tải danh sách tài khoản..." />
+        ) : fetchError ? (
+          <EmptyState title="Đã xảy ra lỗi" description={fetchError} />
+        ) : users.length === 0 ? (
+          <EmptyState title="Chưa có tài khoản" description="Nhấn “Tạo tài khoản” để thêm người dùng mới." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
               <thead>
-                <tr style={styles.tableHeadRow}>
-                  <th style={styles.th}>ID</th>
-                  <th style={styles.th}>Tên đăng nhập</th>
-                  <th style={styles.th}>Email</th>
-                  <th style={styles.th}>Vai trò</th>
-                  <th style={styles.th}>Trạng thái</th>
-                  <th style={styles.th}>Thao tác</th>
+                <tr className="border-b border-admin-border text-xs uppercase tracking-wider text-admin-muted-foreground">
+                  <th className="px-5 py-3 font-semibold">ID</th>
+                  <th className="px-5 py-3 font-semibold">Username</th>
+                  <th className="px-5 py-3 font-semibold">Email</th>
+                  <th className="px-5 py-3 font-semibold">Vai trò</th>
+                  <th className="px-5 py-3 font-semibold">Trạng thái</th>
+                  <th className="px-5 py-3 text-right font-semibold">Thao tác</th>
                 </tr>
               </thead>
               <tbody>
-                {users.map(u => (
-                  <tr
-                    key={u.id}
-                    style={u.id === currentUser.id ? { ...styles.tableRow, background: '#fafbff' } : styles.tableRow}
-                  >
-                    <td style={styles.td}>{u.id}</td>
-                    <td style={styles.td}>
-                      {u.username}
-                      {u.id === currentUser.id && <span style={styles.selfBadge}> (bạn)</span>}
-                    </td>
-                    <td style={styles.td}>{u.email}</td>
-                    <td style={styles.td}>
-                      {u.id === currentUser.id ? (
-                        <span style={roleBadgeStyle(u.role)}>{u.role}</span>
-                      ) : (
-                        <select
-                          style={styles.roleSelect}
-                          value={u.role}
-                          onChange={e => handleRoleChange(u.id, e.target.value)}
-                        >
-                          {ROLES.map(r => (
-                            <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-                    <td style={styles.td}>
-                      <span style={u.is_active ? styles.activeBadge : styles.lockedBadge}>
-                        {u.is_active ? '● Hoạt động' : '● Đã khóa'}
-                      </span>
-                    </td>
-                    <td style={styles.td}>
-                      {u.id !== currentUser.id ? (
-                        <div style={styles.actionGroup}>
-                          <button
-                            onClick={() => handleToggleLock(u.id)}
-                            style={u.is_active ? styles.lockBtn : styles.unlockBtn}
-                          >
-                            {u.is_active ? '🔒 Khóa' : '🔓 Mở khóa'}
-                          </button>
-                          <button
-                            onClick={() => handleSoftDelete(u.id, u.username)}
-                            style={styles.deleteBtn}
-                          >
-                            🗑️ Xóa
-                          </button>
-                        </div>
-                      ) : (
-                        <span style={styles.naText}>—</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {users.length === 0 && (
-                  <tr>
-                    <td colSpan={6} style={{ ...styles.td, textAlign: 'center', color: '#888', padding: '32px' }}>
-                      Chưa có tài khoản nào.
-                    </td>
-                  </tr>
-                )}
+                {users.map((u) => {
+                  const isSelf = u.id === currentUser?.id
+                  return (
+                    <tr key={u.id} className="border-b border-admin-border/60 transition-colors last:border-0 hover:bg-admin-muted/40">
+                      <td className="px-5 py-3 text-admin-muted-foreground">{u.id}</td>
+                      <td className="px-5 py-3">
+                        <span className="font-medium text-admin-card-foreground">{u.username}</span>
+                        {isSelf ? (
+                          <span className="ml-2 rounded-full bg-admin-primary-soft px-2 py-0.5 text-[11px] font-semibold text-admin-primary">
+                            bạn
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-5 py-3 text-admin-muted-foreground">{u.email}</td>
+                      <td className="px-5 py-3">
+                        {isSelf ? (
+                          <StatusBadge tone={roleTone(u.role)}>{u.role}</StatusBadge>
+                        ) : (
+                          <div className="relative inline-flex">
+                            <select
+                              value={u.role}
+                              onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                              className="appearance-none rounded-admin-sm border border-admin-border bg-admin-card py-1.5 pl-3 pr-8 text-xs font-semibold capitalize text-admin-card-foreground transition-colors hover:bg-admin-muted focus:border-admin-ring focus:outline-none focus:ring-2 focus:ring-admin-ring/30"
+                            >
+                              {ROLES.map((r) => (
+                                <option key={r} value={r}>
+                                  {r}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-admin-muted-foreground" />
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-5 py-3">
+                        {u.is_active ? (
+                          <StatusBadge tone="success">Hoạt động</StatusBadge>
+                        ) : (
+                          <StatusBadge tone="danger">Đã khóa</StatusBadge>
+                        )}
+                      </td>
+                      <td className="px-5 py-3">
+                        {isSelf ? (
+                          <div className="text-right text-admin-muted-foreground">—</div>
+                        ) : (
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleLock(u.id)}
+                              title={u.is_active ? "Khóa tài khoản" : "Mở khóa tài khoản"}
+                              className="flex h-8 w-8 items-center justify-center rounded-admin-sm border border-admin-border bg-admin-card text-admin-muted-foreground transition-colors hover:bg-admin-muted hover:text-admin-card-foreground"
+                            >
+                              {u.is_active ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSoftDelete(u.id, u.username)}
+                              title="Xóa tài khoản"
+                              className="flex h-8 w-8 items-center justify-center rounded-admin-sm border border-admin-border bg-admin-card text-admin-danger transition-colors hover:bg-admin-danger-soft"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      {/* Create user modal */}
+      <Modal
+        open={showCreateForm}
+        title="Tạo tài khoản mới"
+        description="Điền thông tin để thêm người dùng vào hệ thống."
+        onClose={() => setShowCreateForm(false)}
+      >
+        <form id="create-user-form" onSubmit={handleCreateSubmit} className="flex flex-col gap-4">
+          <Field label="Username">
+            <input
+              type="text"
+              value={createForm.username}
+              onChange={(e) => setCreateForm({ ...createForm, username: e.target.value })}
+              placeholder="vd: mai_tanaka"
+              className="rounded-admin-sm border border-admin-border bg-admin-background px-3.5 py-2.5 text-sm text-admin-foreground placeholder:text-admin-muted-foreground focus:border-admin-ring focus:outline-none focus:ring-2 focus:ring-admin-ring/30"
+            />
+          </Field>
+          <Field label="Email">
+            <input
+              type="email"
+              value={createForm.email}
+              onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+              placeholder="vd: mai@lingua.app"
+              className="rounded-admin-sm border border-admin-border bg-admin-background px-3.5 py-2.5 text-sm text-admin-foreground placeholder:text-admin-muted-foreground focus:border-admin-ring focus:outline-none focus:ring-2 focus:ring-admin-ring/30"
+            />
+          </Field>
+          <Field label="Mật khẩu">
+            <input
+              type="password"
+              value={createForm.password}
+              onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+              placeholder="••••••••"
+              className="rounded-admin-sm border border-admin-border bg-admin-background px-3.5 py-2.5 text-sm text-admin-foreground placeholder:text-admin-muted-foreground focus:border-admin-ring focus:outline-none focus:ring-2 focus:ring-admin-ring/30"
+            />
+          </Field>
+          <Field label="Vai trò">
+            <div className="relative">
+              <select
+                value={createForm.role}
+                onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })}
+                className="w-full appearance-none rounded-admin-sm border border-admin-border bg-admin-background px-3.5 py-2.5 pr-9 text-sm capitalize text-admin-foreground focus:border-admin-ring focus:outline-none focus:ring-2 focus:ring-admin-ring/30"
+              >
+                {ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-admin-muted-foreground" />
+            </div>
+          </Field>
+          <div className="mt-2 flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setShowCreateForm(false)}
+              className="rounded-admin-sm border border-admin-border bg-admin-card px-4 py-2 text-sm font-semibold text-admin-card-foreground transition-colors hover:bg-admin-muted"
+            >
+              Hủy
+            </button>
+            <button
+              type="submit"
+              disabled={creating}
+              className="inline-flex items-center gap-2 rounded-admin-sm bg-admin-primary px-4 py-2 text-sm font-semibold text-admin-primary-foreground transition hover:brightness-95 disabled:opacity-60"
+            >
+              <Plus className="h-4 w-4" />
+              {creating ? "Đang tạo..." : "Tạo tài khoản"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={!!confirm}
+        title={confirm?.title}
+        description={confirm?.description}
+        confirmLabel={confirm?.confirmLabel}
+        onConfirm={confirm?.onConfirm}
+        onCancel={() => setConfirm(null)}
+      />
     </div>
-  );
+  )
 }
-
-const roleBadgeStyle = (role) => ({
-  background: role === 'admin' ? '#fed7d7' : role === 'teacher' ? '#bee3f8' : '#e9d8fd',
-  color: role === 'admin' ? '#c53030' : role === 'teacher' ? '#2b6cb0' : '#553c9a',
-  padding: '3px 10px',
-  borderRadius: '12px',
-  fontSize: '12px',
-  fontWeight: '600',
-  display: 'inline-block'
-});
-
-const styles = {
-  wrapper: {
-    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
-    minHeight: '100vh',
-    background: 'radial-gradient(circle at top left, #eef4ff 0%, #f7f9ff 35%, #eef2ff 100%)'
-  },
-  header: {
-    background: 'rgba(255,255,255,0.84)',
-    backdropFilter: 'blur(18px)',
-    borderBottom: '1px solid rgba(148,163,184,0.18)',
-    padding: '16px 32px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    color: '#0f172a',
-    boxShadow: '0 8px 30px rgba(15,23,42,0.06)'
-  },
-  headerLeft: { display: 'flex', alignItems: 'center', gap: '16px' },
-  headerRight: {},
-  backBtn: {
-    background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
-    color: '#fff',
-    border: 'none',
-    padding: '7px 16px',
-    borderRadius: '999px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '600'
-  },
-  logo: { fontSize: '20px', fontWeight: '800', letterSpacing: '-0.02em' },
-  welcomeText: { fontSize: '14px', color: '#475569' },
-  content: { maxWidth: '1280px', margin: '0 auto', padding: '28px 24px 40px' },
-  heroCard: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(0, 1.3fr) minmax(280px, 0.9fr)',
-    gap: '20px',
-    padding: '24px 28px',
-    marginBottom: '20px',
-    borderRadius: '28px',
-    background: 'linear-gradient(135deg, rgba(79,70,229,0.96) 0%, rgba(124,58,237,0.92) 52%, rgba(59,130,246,0.9) 100%)',
-    color: '#fff',
-    boxShadow: '0 24px 60px rgba(79,70,229,0.22)'
-  },
-  heroEyebrow: { margin: 0, fontSize: '12px', fontWeight: '700', letterSpacing: '0.24em', textTransform: 'uppercase', opacity: 0.85 },
-  heroTitle: { margin: '8px 0 10px', fontSize: '30px', lineHeight: 1.1, letterSpacing: '-0.04em' },
-  heroDescription: { margin: 0, maxWidth: '680px', color: 'rgba(255,255,255,0.86)', fontSize: '14px', lineHeight: 1.7 },
-  heroStats: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', alignSelf: 'stretch' },
-  statCard: {
-    borderRadius: '20px',
-    background: 'rgba(255,255,255,0.16)',
-    border: '1px solid rgba(255,255,255,0.18)',
-    padding: '16px'
-  },
-  statLabel: { display: 'block', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.16em', opacity: 0.82, marginBottom: '10px' },
-  statValue: { fontSize: '28px', lineHeight: 1, fontWeight: '800' },
-  topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '16px', flexWrap: 'wrap' },
-  sectionTitle: { color: '#0f172a', margin: 0, fontSize: '20px', fontWeight: '800', letterSpacing: '-0.02em' },
-  createBtn: {
-    background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
-    color: '#fff',
-    border: 'none',
-    padding: '10px 22px',
-    borderRadius: '999px',
-    cursor: 'pointer',
-    fontWeight: '600',
-    fontSize: '14px'
-  },
-  createCard: {
-    background: 'rgba(248,250,252,0.92)',
-    borderRadius: '22px',
-    padding: '24px',
-    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.6)',
-    marginBottom: '24px',
-    border: '1px solid rgba(148,163,184,0.18)'
-  },
-  createTitle: { color: '#0f172a', marginTop: 0, marginBottom: '18px', fontSize: '16px', fontWeight: '700' },
-  formRow: { display: 'flex', gap: '16px', marginBottom: '14px' },
-  formGroup: { flex: 1 },
-  label: { display: 'block', color: '#475569', fontSize: '13px', fontWeight: '700', marginBottom: '6px' },
-  input: {
-    width: '100%',
-    padding: '10px 14px',
-    borderRadius: '14px',
-    border: '1px solid rgba(148,163,184,0.22)',
-    fontSize: '14px',
-    boxSizing: 'border-box',
-    outline: 'none',
-    color: '#0f172a',
-    background: '#fff'
-  },
-  submitBtn: {
-    background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
-    color: '#fff',
-    border: 'none',
-    padding: '10px 26px',
-    borderRadius: '999px',
-    cursor: 'pointer',
-    fontWeight: '600',
-    fontSize: '14px',
-    marginTop: '6px'
-  },
-  successBanner: {
-    background: '#ecfdf5',
-    color: '#166534',
-    border: '1px solid #bbf7d0',
-    padding: '10px 16px',
-    borderRadius: '14px',
-    marginBottom: '16px',
-    fontSize: '14px'
-  },
-  errorBanner: {
-    background: '#fff1f2',
-    color: '#be123c',
-    border: '1px solid #fecdd3',
-    padding: '10px 16px',
-    borderRadius: '14px',
-    marginBottom: '16px',
-    fontSize: '14px'
-  },
-  tableWrapper: {
-    background: 'rgba(255,255,255,0.86)',
-    borderRadius: '20px',
-    boxShadow: '0 12px 30px rgba(15,23,42,0.06)',
-    overflow: 'hidden',
-    border: '1px solid rgba(148,163,184,0.14)'
-  },
-  table: { width: '100%', borderCollapse: 'collapse' },
-  tableHeadRow: { background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' },
-  th: { padding: '14px 16px', color: '#fff', textAlign: 'left', fontSize: '13px', fontWeight: '700' },
-  tableRow: { borderBottom: '1px solid rgba(226,232,240,0.9)' },
-  td: { padding: '13px 16px', fontSize: '14px', color: '#0f172a' },
-  selfBadge: { color: '#64748b', fontSize: '12px', fontStyle: 'italic' },
-  roleSelect: {
-    padding: '5px 10px',
-    borderRadius: '10px',
-    border: '1px solid rgba(148,163,184,0.22)',
-    fontSize: '13px',
-    cursor: 'pointer',
-    color: '#0f172a',
-    background: '#fff'
-  },
-  activeBadge: {
-    background: '#dcfce7',
-    color: '#166534',
-    padding: '3px 10px',
-    borderRadius: '999px',
-    fontSize: '12px',
-    fontWeight: '600'
-  },
-  lockedBadge: {
-    background: '#fee2e2',
-    color: '#b91c1c',
-    padding: '3px 10px',
-    borderRadius: '999px',
-    fontSize: '12px',
-    fontWeight: '600'
-  },
-  lockBtn: {
-    background: '#fff1f2',
-    color: '#be123c',
-    border: '1px solid #fecdd3',
-    padding: '5px 13px',
-    borderRadius: '10px',
-    cursor: 'pointer',
-    fontSize: '12px',
-    fontWeight: '600'
-  },
-  unlockBtn: {
-    background: '#ecfdf5',
-    color: '#166534',
-    border: '1px solid #bbf7d0',
-    padding: '5px 13px',
-    borderRadius: '10px',
-    cursor: 'pointer',
-    fontSize: '12px',
-    fontWeight: '600'
-  },
-  naText: { color: '#cbd5e1', fontSize: '14px' },
-  deletedSection: { marginBottom: '24px' },
-  deletedToggleBtn: {
-    background: '#fff7ed',
-    color: '#c2410c',
-    border: '1px solid #fed7aa',
-    padding: '9px 18px',
-    borderRadius: '999px',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '600'
-  },
-  restoreBtn: {
-    background: '#ecfdf5',
-    color: '#166534',
-    border: '1px solid #bbf7d0',
-    padding: '5px 13px',
-    borderRadius: '10px',
-    cursor: 'pointer',
-    fontSize: '12px',
-    fontWeight: '600'
-  },
-  actionGroup: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
-  deleteBtn: {
-    background: '#fff7ed',
-    color: '#c2410c',
-    border: '1px solid #fed7aa',
-    padding: '5px 13px',
-    borderRadius: '10px',
-    cursor: 'pointer',
-    fontSize: '12px',
-    fontWeight: '600'
-  },
-  statusText: { color: '#64748b', textAlign: 'center', padding: '40px' },
-  errorText: { color: '#be123c', fontSize: '14px', margin: '8px 0' },
-  successText: { color: '#166534', fontSize: '14px', margin: '8px 0' }
-};
 
 export default AdminAccountManager;

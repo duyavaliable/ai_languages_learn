@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { User, Mail, Lock, Loader2, GraduationCap, ArrowRight } from 'lucide-react';
 import api from '../services/api';
 
 function RegisterTeacherPage() {
@@ -14,6 +15,7 @@ function RegisterTeacherPage() {
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+    if (error) setError('');
   };
 
   const handleSubmit = async (e) => {
@@ -31,195 +33,131 @@ function RegisterTeacherPage() {
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.brandPanel}>
-        <div style={styles.brandBadge}>Teacher workspace</div>
-        <h1 style={styles.brandTitle}>Đăng ký tài khoản giáo viên</h1>
-        <p style={styles.brandText}>
-          Tạo tài khoản để vào không gian làm việc riêng cho teacher, nơi bạn có thể tạo vocabulary và exercise theo course.
-        </p>
+    <div className="min-h-screen flex items-center justify-center bg-background p-4 sm:p-8">
+      {/* Background Decorative Elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[0%] left-[0%] w-[50%] h-[50%] bg-teal-500/10 rounded-full blur-[120px]" />
+        <div className="absolute bottom-[0%] right-[0%] w-[50%] h-[50%] bg-primary/10 rounded-full blur-[120px]" />
       </div>
-      <div style={styles.card}>
-        <h2 style={styles.title}>Đăng ký Teacher</h2>
-        <p style={styles.subtitle}>Một bước để vào dashboard dành cho giáo viên.</p>
 
-        {error && <div style={styles.error}>{error}</div>}
+      <div className="w-full max-w-5xl flex flex-col md:flex-row items-center gap-10 lg:gap-20 relative z-10 animate-fade-in">
+        
+        {/* Left Side: Branding */}
+        <div className="flex-1 text-center md:text-left pt-8 md:pt-0">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-teal-500/10 text-teal-600 border border-teal-500/20 text-sm font-bold tracking-wide uppercase mb-6">
+            <GraduationCap className="w-4 h-4" />
+            <span>Teacher Workspace</span>
+          </div>
+          <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold text-card-foreground tracking-tight leading-[1.1] mb-6">
+            Đăng ký tài khoản <span className="text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-primary">giáo viên</span>
+          </h1>
+          <p className="text-base md:text-lg text-muted-foreground leading-relaxed max-w-xl mx-auto md:mx-0">
+            Tạo tài khoản để truy cập không gian làm việc chuyên dụng, nơi bạn có thể tạo từ vựng, thiết kế bài tập và quản lý khóa học của mình.
+          </p>
+        </div>
 
-        <form onSubmit={handleSubmit}>
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Tên người dùng</label>
-            <input
-              type="text"
-              name="username"
-              value={form.username}
-              onChange={handleChange}
-              placeholder="Nhập tên người dùng"
-              style={styles.input}
-              required
-            />
+        {/* Right Side: Registration Form */}
+        <div className="w-full max-w-[420px] bg-card/80 backdrop-blur-xl rounded-[1.5rem] shadow-shadow-elegant border border-border/50 p-8">
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold text-card-foreground tracking-tight">
+              Đăng ký Teacher
+            </h2>
+            <p className="text-muted-foreground mt-1.5 text-sm">
+              Một bước để vào dashboard dành cho giáo viên.
+            </p>
           </div>
 
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Email</label>
-            <input
-              type="email"
-              name="email"
-              value={form.email}
-              onChange={handleChange}
-              placeholder="Nhập email"
-              style={styles.input}
-              required
-            />
+          {error && (
+            <div className="bg-destructive/10 border border-destructive/20 text-destructive text-sm font-medium px-4 py-3 rounded-xl mb-6 animate-in slide-in-from-top-2">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="space-y-1.5">
+              <label className="text-sm font-semibold text-card-foreground">Tên người dùng</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-4 flex items-center text-muted-foreground pointer-events-none">
+                  <User className="w-5 h-5" />
+                </span>
+                <input
+                  type="text"
+                  name="username"
+                  value={form.username}
+                  onChange={handleChange}
+                  placeholder="Nhập tên người dùng"
+                  className="w-full pl-11 pr-4 py-3 bg-background border border-border rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all placeholder:text-muted-foreground"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-semibold text-card-foreground">Email</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-4 flex items-center text-muted-foreground pointer-events-none">
+                  <Mail className="w-5 h-5" />
+                </span>
+                <input
+                  type="email"
+                  name="email"
+                  value={form.email}
+                  onChange={handleChange}
+                  placeholder="Nhập email"
+                  className="w-full pl-11 pr-4 py-3 bg-background border border-border rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all placeholder:text-muted-foreground"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-semibold text-card-foreground">Mật khẩu</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-4 flex items-center text-muted-foreground pointer-events-none">
+                  <Lock className="w-5 h-5" />
+                </span>
+                <input
+                  type="password"
+                  name="password"
+                  value={form.password}
+                  onChange={handleChange}
+                  placeholder="Nhập mật khẩu"
+                  className="w-full pl-11 pr-4 py-3 bg-background border border-border rounded-xl text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all placeholder:text-muted-foreground"
+                  required
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-gradient-to-r from-teal-600 to-primary text-white font-semibold rounded-xl hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-teal-500/30 disabled:opacity-70 disabled:cursor-not-allowed mt-4 shadow-shadow-glow"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Đang xử lý...
+                </>
+              ) : (
+                <>
+                  Đăng ký Teacher <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </form>
+
+          <div className="mt-8 pt-6 border-t border-border/50 text-center">
+            <p className="text-sm text-muted-foreground">
+              Đã có tài khoản?{' '}
+              <Link to="/login" className="font-semibold text-teal-600 hover:text-teal-700 transition-colors">
+                Đăng nhập
+              </Link>
+            </p>
           </div>
-
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Mật khẩu</label>
-            <input
-              type="password"
-              name="password"
-              value={form.password}
-              onChange={handleChange}
-              placeholder="Nhập mật khẩu"
-              style={styles.input}
-              required
-            />
-          </div>
-
-          <button type="submit" style={styles.button} disabled={loading}>
-            {loading ? 'Đang đăng ký...' : 'Đăng ký Teacher'}
-          </button>
-        </form>
-
-        <p style={styles.link}>
-          Đã có tài khoản?{' '}
-          <Link to="/login" style={styles.linkText}>Đăng nhập</Link>
-        </p>
+        </div>
       </div>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    minHeight: '100vh',
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '24px',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 28%), linear-gradient(180deg, #eef4fb 0%, #f7f9fc 55%, #edf2f8 100%)',
-    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
-    padding: '28px'
-  },
-  brandPanel: {
-    flex: '1 1 480px',
-    maxWidth: '560px',
-    padding: '20px 12px'
-  },
-  brandBadge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    borderRadius: '999px',
-    border: '1px solid rgba(37, 99, 235, 0.18)',
-    background: 'rgba(255,255,255,0.8)',
-    color: '#1d4ed8',
-    padding: '8px 12px',
-    fontSize: '12px',
-    fontWeight: 700,
-    letterSpacing: '0.08em',
-    textTransform: 'uppercase'
-  },
-  brandTitle: {
-    margin: '18px 0 12px',
-    fontSize: '44px',
-    lineHeight: 1.06,
-    color: '#0f172a',
-    letterSpacing: '-0.04em'
-  },
-  brandText: {
-    margin: 0,
-    color: '#475569',
-    fontSize: '16px',
-    lineHeight: 1.8,
-    maxWidth: '46ch'
-  },
-  card: {
-    width: '100%',
-    maxWidth: '420px',
-    flex: '0 1 420px',
-    background: 'rgba(255,255,255,0.9)',
-    borderRadius: '24px',
-    padding: '34px 30px',
-    boxShadow: '0 22px 44px rgba(15,23,42,0.08)',
-    border: '1px solid rgba(148, 163, 184, 0.18)',
-    backdropFilter: 'blur(12px)',
-  },
-  title: {
-    margin: 0,
-    textAlign: 'left',
-    color: '#0f172a',
-    fontSize: '26px',
-    letterSpacing: '-0.03em'
-  },
-  subtitle: {
-    textAlign: 'left',
-    color: '#64748b',
-    marginTop: '8px',
-    marginBottom: '24px'
-  },
-  error: {
-    background: '#fff1f2',
-    color: '#b91c1c',
-    border: '1px solid #fecdd3',
-    borderRadius: '8px',
-    padding: '10px 12px',
-    marginBottom: '14px',
-    fontSize: '14px'
-  },
-  formGroup: {
-    marginBottom: '14px'
-  },
-  label: {
-    display: 'block',
-    marginBottom: '6px',
-    color: '#334155',
-    fontWeight: 600,
-    fontSize: '14px'
-  },
-  input: {
-    width: '100%',
-    border: '1px solid #d6dee9',
-    borderRadius: '12px',
-    padding: '11px 12px',
-    fontSize: '14px',
-    outline: 'none',
-    boxSizing: 'border-box',
-    background: '#fff',
-    color: '#0f172a'
-  },
-  button: {
-    width: '100%',
-    marginTop: '8px',
-    border: 'none',
-    borderRadius: '12px',
-    padding: '12px',
-    color: '#ffffff',
-    fontWeight: 700,
-    fontSize: '15px',
-    cursor: 'pointer',
-    background: 'linear-gradient(120deg, #0f766e 0%, #2563eb 100%)'
-  },
-  link: {
-    textAlign: 'center',
-    marginTop: '18px',
-    marginBottom: 0,
-    color: '#64748b'
-  },
-  linkText: {
-    color: '#0f766e',
-    fontWeight: 700,
-    textDecoration: 'none'
-  }
-};
 
 export default RegisterTeacherPage;

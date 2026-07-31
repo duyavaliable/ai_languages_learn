@@ -10,9 +10,13 @@ import SkillExercisesPage from "./pages/SkillExercisesPage.jsx"
 import ExerciseAttemptPage from "./pages/ExerciseAttemptPage.jsx"
 import AdminAccountManager from "./pages/AdminAccountManager.jsx"
 import AdminContentManager from "./pages/AdminContentManager.jsx"
+import AdminOverview from "./pages/AdminOverview.jsx"
+import AdminLayout from "./components/admin/layout/AdminLayout.jsx"
 import TeacherCreateContent from "./pages/TeacherCreateContent.jsx"
 import UnauthorizedPage from "./pages/Unauthorized.jsx"
 import ProfilePage from "./pages/ProfilePage.jsx"
+import AdminProfilePage from "./pages/AdminProfilePage.jsx"
+import AdminSettingsPage from "./pages/AdminSettingsPage.jsx"
 
 function App() {
   return (
@@ -51,21 +55,20 @@ function App() {
         />
 
         <Route
-          path="/admin/users"
+          path="/admin"
           element={
             <PrivateRoute allowedRoles={["admin"]}>
-              <AdminAccountManager />
+              <AdminLayout />
             </PrivateRoute>
           }
-        />
-        <Route
-          path="/admin/content"
-          element={
-            <PrivateRoute allowedRoles={["admin"]}>
-              <AdminContentManager />
-            </PrivateRoute>
-          }
-        />
+        >
+          <Route index element={<AdminOverview />} />
+          <Route path="users" element={<AdminAccountManager />} />
+          <Route path="content" element={<AdminContentManager />} />
+          <Route path="exercises" element={<AdminContentManager />} />
+          <Route path="profile" element={<AdminProfilePage />} />
+          <Route path="settings" element={<AdminSettingsPage />} />
+        </Route>
         <Route
           path="/teacher/create-content"
           element={
