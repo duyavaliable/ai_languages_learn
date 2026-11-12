@@ -1,15 +1,47 @@
-import { Exercise } from '../models/index.js';
+import { Exercise, Language } from '../models/index.js';
+
+/**
+ * Ngôn ngữ của một "khóa ảo" = ngôn ngữ của các bài trong đó.
+ *
+ * Trước đây hàm này gán cứng `language_id: null`, nên giao diện không biết khóa
+ * là tiếng Anh hay tiếng Nhật. Hệ quả: trang chọn kỹ năng luôn hiện bộ VSTEP
+ * (Nghe/Nói/Đọc/Viết) — khóa tiếng Nhật hiện ô "Viết" không có bài, và thiếu
+ * hẳn ô "Ngữ pháp" dù có bài.
+ *
+ * Lấy theo ĐA SỐ, phòng khi một khóa lỡ lẫn bài khác ngôn ngữ.
+ */
+const pickLanguage = (exercises) => {
+  const count = new Map();
+  for (const e of exercises) {
+    if (!e.language_id) continue;
+    count.set(e.language_id, (count.get(e.language_id) || 0) + 1);
+  }
+  if (!count.size) return { language_id: null, language: null };
+  const [bestId] = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
+  const withLang = exercises.find((e) => e.language_id === bestId && e.language);
+  return {
+    language_id: bestId,
+    language: withLang?.language
+      ? {
+        id: withLang.language.id,
+        name: withLang.language.name,
+        code: withLang.language.code
+      }
+      : null
+  };
+};
 
 const buildCourseSummary = (courseId, exercises) => {
+  const { language_id, language } = pickLanguage(exercises);
   return {
     id: Number(courseId),
-    language_id: null,
+    language_id,
+    language,
     name: `Khóa ${courseId}`,
     description: null,
     level: null,
     duration: null,
     is_deleted: false,
-    lessons: [],
     exercises_count: exercises.length
   };
 };
@@ -17,6 +49,10 @@ const buildCourseSummary = (courseId, exercises) => {
 const loadVirtualCourses = async () => {
   const exercises = await Exercise.findAll({
     where: { is_deleted: false },
+    include: [{
+      model: Language, as: 'language', attributes: ['id', 'name', 'code'],
+      required: false
+    }],
     order: [['id', 'DESC']]
   });
 

@@ -5,7 +5,7 @@ node_modules/
 dist/
 build/
 
-# logs
+# logs (nhật ký chấm trực tiếp logs/live-scoring.log...)
 logs/
 *.log
 npm-debug.log*
@@ -13,7 +13,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# env files
+# env files — chứa mật khẩu MySQL, JWT_SECRET, khoá API. Chỉ đưa .env.example lên.
 .env
 .env.*
 !.env.example
@@ -27,6 +27,9 @@ Thumbs.db
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
+# cấu hình riêng của Claude Code / công cụ trên máy này
+.claude/
+.github/modernize/
 
 # coverage/cache
 coverage/
@@ -36,9 +39,36 @@ coverage/
 # local database/temp
 *.sqlite
 *.sqlite3
+*.sql
 tmp/
 
-# uploads/audio: ignore all generated audio files
-uploads/audio/*
-!uploads/audio/.gitkeep
-!uploads/audio/.gitignore
+# File người dùng tải lên — KHÔNG đưa lên GitHub (nặng, và là nội dung đề/bài nghe):
+#   uploads/audio      file nghe
+#   uploads/scan       ảnh câu hỏi cắt từ đề PDF quét
+#   uploads/scan-jobs  thư mục phiên quét tạm
+# Server tự tạo lại các thư mục này khi cần.
+uploads/
+# Ảnh cắt từ đề thi (JLPT...) — nội dung có bản quyền, chỉ để trên máy (bài trong CSDL trỏ tới các ảnh này)
+public/images/jlpt/
+
+# File âm thanh / đề gốc lỡ để ngoài uploads
+*.mp3
+*.wav
+*.m4a
+*.aac
+*.ogg
+*.webm
+*.mpeg
+*.mpga
+
+# Python (bộ quét đề services/scan)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Dữ liệu ngôn ngữ của tesseract.js — tự tải lại khi chạy OCR lần đầu
+*.traineddata
+
+# LanguageTool (~250 MB) — tải bằng `npm run lt:setup`
+tools/

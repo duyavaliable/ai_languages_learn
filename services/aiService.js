@@ -1,9 +1,6 @@
-// Option 1 (the way you requested): paste Gemini API key directly here.
-// Example: const HARDCODED_GEMINI_API_KEY = 'AIzaSy...';
-const HARDCODED_GEMINI_API_KEY = '';
 import fs from 'fs';
 
-// Option 2: keep key in .env (recommended for security).
+// Khoá Gemini CHỈ đặt trong .env (GEMINI_API_KEY) — không dán vào code (code được đưa lên GitHub).
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL_TEXT = 'gemini-2.5-flash-lite';
 
@@ -18,7 +15,7 @@ const getMaskedKey = () => {
 
 function ensureGeminiConfigured() {
   if (!GEMINI_API_KEY) {
-    throw new Error('Gemini API key is missing. Set HARDCODED_GEMINI_API_KEY in services/aiService.js or GEMINI_API_KEY in .env');
+    throw new Error('Gemini API key is missing. Set GEMINI_API_KEY in .env');
   }
 }
 
@@ -276,7 +273,7 @@ export const generateExercisesForCourseSkill = async ({ skill, cefrLevel, count 
     if (!parsedSet) {
       throw lastErr || new Error('AI did not return valid JSON');
     }
-    
+
     console.log('[generateExercisesForCourseSkill] Exercise parsed successfully', {
       skill: safeSkill,
       cefrLevel: safeLevel,
@@ -326,11 +323,11 @@ export const refineExerciseSet = async ({ skill, cefrLevel, feedback, currentExe
     sampleAnswer: String(currentExercise?.sampleAnswer || '').slice(0, 600),
     questions: Array.isArray(currentExercise?.questions)
       ? currentExercise.questions.slice(0, 6).map((q) => ({
-          question: String(q?.question || ''),
-          options: Array.isArray(q?.options) ? q.options.slice(0, 4).map((o) => String(o || '')) : [],
-          correctAnswer: String(q?.correctAnswer || ''),
-          explanation: String(q?.explanation || '').slice(0, 160)
-        }))
+        question: String(q?.question || ''),
+        options: Array.isArray(q?.options) ? q.options.slice(0, 4).map((o) => String(o || '')) : [],
+        correctAnswer: String(q?.correctAnswer || ''),
+        explanation: String(q?.explanation || '').slice(0, 160)
+      }))
       : []
   };
 
@@ -542,9 +539,9 @@ export const validateVocabularyColumnsWithAI = async (items = []) => {
 function calculateSimilarity(str1, str2) {
   const longer = str1.length > str2.length ? str1 : str2;
   const shorter = str1.length > str2.length ? str2 : str1;
-  
+
   if (longer.length === 0) return 1.0;
-  
+
   const editDistance = levenshteinDistance(longer, shorter);
   return (longer.length - editDistance) / longer.length;
 }
@@ -685,7 +682,7 @@ function parseJsonContent(rawContent) {
         extractedLength: extracted.length,
         extractedPreview: extracted.substring(0, 200)
       });
-      
+
       const parsedMarkdown = tryParse(extracted, `markdown-block-${i + 1}`);
       if (parsedMarkdown !== null) return parsedMarkdown;
     }
@@ -765,7 +762,7 @@ function parseExerciseSetJson(rawContent) {
 
   const questions = parsed.questions.map((item, idx) => {
     const options = Array.isArray(item?.options) ? item.options.map((opt) => normalizeGeneratedText(opt)).filter(Boolean) : [];
-    
+
     // For reading/listening exercises, enforce 2+ options
     // For writing/speaking, questions array may be empty, so skip this check
     if (options.length > 0 && options.length < 2) {
@@ -774,7 +771,7 @@ function parseExerciseSetJson(rawContent) {
 
     const correctAnswer = normalizeGeneratedText(item?.correctAnswer);
     let normalizedCorrect = correctAnswer;
-    
+
     // Only try to match correctAnswer with options if options exist
     if (options.length > 0) {
       normalizedCorrect = options.find((opt) => opt.toLowerCase() === correctAnswer.toLowerCase()) || correctAnswer;
@@ -882,10 +879,10 @@ export async function gradeSpeechWithAI({
 
     const errors = Array.isArray(parsed.errors)
       ? parsed.errors.slice(0, 10).map((item) => ({
-          word: String(item?.word || '').trim(),
-          issue: String(item?.issue || '').trim(),
-          suggestion: String(item?.suggestion || '').trim()
-        }))
+        word: String(item?.word || '').trim(),
+        issue: String(item?.issue || '').trim(),
+        suggestion: String(item?.suggestion || '').trim()
+      }))
       : [];
 
     return {
@@ -974,7 +971,7 @@ export async function transcribeAudioWithAI(audioPath) {
     // For now, return empty string as fallback
     // In production, you would integrate with Whisper API or Google Cloud Speech-to-Text
     // Example with Whisper would require: npm install openai
-    
+
     console.log('[transcribeAudioWithAI] Audio transcription not yet integrated', {
       audioPath
     });

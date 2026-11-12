@@ -10,21 +10,33 @@ const allowedAudioTypes = new Set([
   'audio/webm',
   'audio/ogg',
   'audio/mp4',
-  'audio/x-m4a'
+  'audio/x-m4a',
+  'audio/m4a',
+  'audio/wave',
+  'audio/vnd.wave',
+  'audio/aac',
+  'audio/x-aac'
 ]);
+// trình duyệt / Windows có khi gửi loại file rỗng hoặc application/octet-stream: nhận theo đuôi file
+const AUDIO_NAME_RE = /\.(mp3|wav|m4a|mp4|aac|ogg|oga|webm)$/i;
 
+// File nghe cả đề (JLPT, IELTS…) thường 30–80 MB -> giới hạn 150 MB mỗi file
+const AUDIO_MAX_MB = 150;
 const uploadAudio = multer({
   storage,
   limits: {
-    fileSize: 30 * 1024 * 1024
+    fileSize: AUDIO_MAX_MB * 1024 * 1024
   },
   fileFilter: (_req, file, cb) => {
-    if (!allowedAudioTypes.has(file.mimetype)) {
-      return cb(new Error('Only audio files are allowed for listening exercises'));
+    if (!allowedAudioTypes.has(file.mimetype) && !AUDIO_NAME_RE.test(String(file.originalname || ''))) {
+      const err = new Error(`File "${file.originalname}" không phải file âm thanh (nhận mp3, wav, m4a, aac, ogg, webm)`);
+      err.uploadRejected = true;
+      return cb(err);
     }
     cb(null, true);
   }
 });
+export { AUDIO_MAX_MB };
 
 const allowedVocabularyTypes = new Set([
   'application/pdf',

@@ -1,8 +1,9 @@
 import bcrypt from 'bcryptjs';
 import { Op } from 'sequelize';
 import { User } from '../models/index.js';
+import { passwordProblem, usernameProblem, isEmail } from '../utils/validation.js';
 
-const VALID_ROLES = ['student', 'teacher', 'admin'];
+const VALID_ROLES = ['student', 'admin'];
 
 export const getAllUsers = async (req, res) => {
   try {
@@ -77,24 +78,30 @@ export const softDeleteUser = async (req, res) => {
 
 export const createUser = async (req, res) => {
   try {
-    const { username, email, password, role } = req.body;
-
-    if (!username || !email || !password || !role) {
-      return res.status(400).json({ message: 'username, email, password and role are required' });
-    }
-
+    const { role } = req.body || {};
     if (!VALID_ROLES.includes(role)) {
       return res.status(400).json({ message: `role must be one of: ${VALID_ROLES.join(', ')}` });
     }
+    const raw = req.body || {};
+    if (typeof raw.username !== 'string' || typeof raw.email !== 'string' || typeof raw.password !== 'string') {
+      return res.status(400).json({ message: 'Cần nhập tên người dùng, email và mật khẩu' });
+    }
+    const username = raw.username.trim();
+    const email = raw.email.trim().toLowerCase();
+    const { password } = raw;
+    const problem = usernameProblem(username)
+      || (isEmail(email) ? null : 'Email không hợp lệ')
+      || passwordProblem(password, { email, username });
+    if (problem) return res.status(400).json({ message: problem });
 
     const exists = await User.findOne({
       where: { [Op.or]: [{ email }, { username }] }
     });
     if (exists) {
-      return res.status(400).json({ message: 'User already exists' });
+      return res.status(400).json({ message: 'Email hoặc tên người dùng đã được sử dụng' });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 12);
     const user = await User.create({
       username,
       email,

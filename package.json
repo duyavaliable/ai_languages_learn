@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
+    "dev": "concurrently -n client,server,lt -c cyan,green,magenta \"npm run dev:client\" \"npm run dev:server\" \"npm run dev:lt\"",
     "dev:client": "vite",
     "dev:server": "node server.js",
+    "dev:lt": "node scripts/languagetool.mjs",
+    "lt:setup": "node scripts/languagetoolSetup.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -16,9 +18,9 @@
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "fast-xml-parser": "^5.7.1",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
     "jsonwebtoken": "^9.0.2",
+    "kuromoji": "^0.1.2",
+    "lucide-react": "^0.468.0",
     "multer": "^2.1.1",
     "mysql2": "^3.18.2",
     "pdf2json": "^4.0.3",
@@ -28,10 +30,8 @@
     "react-router-dom": "^6.20.0",
     "sequelize": "^6.37.7",
     "sharp": "^0.34.5",
-    "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
-    "tesseract.js": "^7.0.0",
-    "lucide-react": "^0.468.0"
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.0",

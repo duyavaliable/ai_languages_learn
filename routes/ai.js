@@ -7,8 +7,8 @@ const router = express.Router();
 
 router.post('/explain', protect, explainConcept);
 router.post('/generate-exercises', protect, generatePracticeExercises);
-router.post('/teacher/generate-exercises', protect, authorize('teacher'), uploadAudio.single('audioFile'), generatePracticeExercises);
-router.post('/teacher/refine-exercise', protect, authorize('teacher'), refinePracticeExercise);
+router.post('/teacher/generate-exercises', protect, authorize('admin'), uploadAudio.single('audioFile'), generatePracticeExercises);
+router.post('/teacher/refine-exercise', protect, authorize('admin'), refinePracticeExercise);
 router.post('/translate', protect, translate);
 router.post('/pronunciation', protect, evaluatePronunciation);
 

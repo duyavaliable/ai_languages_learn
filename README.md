@@ -16,7 +16,6 @@ A comprehensive language learning platform powered by AI, featuring personalized
 ### Backend
 - Node.js + Express
 - MySQL + Sequelize
-- Gemini API (Google AI)
 - JWT Authentication
 
 ### Frontend
@@ -33,54 +32,41 @@ A comprehensive language learning platform powered by AI, featuring personalized
 npm install
 ```
 
-3. Create `.env` file with:
-```env
-PORT=5000
-MYSQL_HOST=localhost
-MYSQL_DATABASE=ai_languages_learn
-MYSQL_USER=root
-MYSQL_PASSWORD=your_password
-JWT_SECRET=your_jwt_secret
+3. Copy `.env.example` to `.env` and fill in the values (MySQL, a random `JWT_SECRET` of 32+ characters,
+   optional `GOOGLE_CLIENT_ID`...). Never commit `.env` and never paste keys into code.
 
-# Gemini API key (required for AI exercise generation)
-GEMINI_API_KEY=AIzaSy...
-# Optional model override
-GEMINI_MODEL=gemini-1.5-flash
+4. Download LanguageTool once (used to check writing, ~250 MB, not in git):
+```bash
+npm run lt:setup
 ```
 
-4. Start app:
+5. Start app (client on :3000, server on :5000, LanguageTool on :8081):
 ```bash
 npm run dev
 ```
 
-## AI Setup Guide (Gemini - Chi tiet)
+6. First admin account: open `/register-admin` while the database has no admin yet. After that the
+   endpoint is closed; more admins are created from the account management page.
 
-1. Tao API key Gemini
-- Vao Google AI Studio: https://aistudio.google.com/app/apikey
-- Tao API key va copy key (thuong bat dau bang `AIza...`).
+Not in git (stay on the local machine only): `uploads/` (audio, scanned exam images),
+`public/images/jlpt/` (images cut from copyrighted exams), `logs/`,
+`tools/` (LanguageTool), `*.traineddata` (tesseract cache, downloaded automatically).
 
-2. Cach 1: Dan key truc tiep vao code (theo dung yeu cau cua ban)
-- Mo file `services/aiService.js`.
-- Tim dong: `const HARDCODED_GEMINI_API_KEY = '';`
-- Dan key vao giua dau nhay, vi du:
-  - `const HARDCODED_GEMINI_API_KEY = 'AIzaSyxxxxxxxx';`
-- Luu file va restart server `npm run dev`.
+## Third-party data
 
-3. Cach 2: Dat key trong `.env` (an toan hon)
-- Mo file `.env` o thu muc goc project.
-- Them dong: `GEMINI_API_KEY=AIzaSy...`
-- (Tuy chon) Them dong: `GEMINI_MODEL=gemini-1.5-flash`
-- Luu file va khoi dong lai server `npm run dev`.
+- `services/data/en_wordfreq.txt` — English word frequencies exported from the
+  [wordfreq](https://github.com/rspeer/wordfreq) project by Robyn Speer (data licensed
+  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)). Used offline to auto-fix typos in
+  imported English exams. This file stays under CC BY-SA 4.0.
+- `services/scan/kanji_neighbors.json` — table of visually similar kanji used by the exam scanner to
+  double-check OCR results (generated for this project).
 
-4. Vi tri code dang dung API key
-- File service AI: `services/aiService.js`
-- Thu tu uu tien key:
-	- `HARDCODED_GEMINI_API_KEY` (dan truc tiep)
-	- neu trong code rong thi moi dung `process.env.GEMINI_API_KEY`
+## Account security
 
-5. Neu key sai hoac chua co
-- API se bao loi: `Gemini API key is missing...` hoac `Gemini request failed...`.
-- Kiem tra lai key va restart server.
+- Passwords: 8–72 characters with at least one letter and one digit, not equal to the email or username
+  (shared rule in `utils/validation.js`, checked by both server and pages). Stored with bcrypt (cost 12).
+- Login / sign-up / password change are rate-limited per IP (`middleware/rateLimit.js`).
+- Login tokens expire after 7 days and become invalid as soon as the password is changed.
 
 ## Luong hoc moi
 

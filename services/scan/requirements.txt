@@ -1,0 +1,15 @@
+# Bộ quét đề PDF (services/scan). Python 3.13. Cài vào một môi trường riêng rồi trỏ SCAN_PYTHON (.env) vào python của nó:
+#   python -m venv %LOCALAPPDATA%\pocr
+#   %LOCALAPPDATA%\pocr\Scripts\python -m pip install -r services/scan/requirements.txt
+# Lần chạy đầu PaddleOCR tự tải model PP-OCRv6 về ~/.paddlex (khoảng vài trăm MB), sau đó chạy offline.
+paddlepaddle==3.3.1
+paddleocr==3.7.0
+paddlex==3.7.2
+pymupdf==2.1
+pdfplumber==0.11.10
+opencv-contrib-python==4.10.0.84
+numpy==2.3.5
+pillow==13.0.0
+# chạy model bằng ONNX Runtime (nhanh ~11 lần so với engine Paddle trên CPU); cần bản ONNX của model,
+# tạo một lần bằng tools/convert_onnx.py — xem README.md. Thiếu thì bộ quét tự dùng engine Paddle (chậm).
+onnxruntime==1.31.1

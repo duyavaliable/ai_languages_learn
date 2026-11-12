@@ -5,8 +5,6 @@ import path, { normalize } from 'path';
 import { parseVocabularyUpload } from './vocabularyImportService.js';
 import sharp from 'sharp';
 
-import { generateGeminiText } from './aiService.js';
-
 const tryRunCommand = (cmd) => {
   try {
     execSync(cmd, { stdio: 'ignore' });
@@ -372,8 +370,6 @@ const extractRelevantParts = (rawText, options = {}) => {
 export async function extractQuestionsFromPart(text, options = {}) {
   if (!text) return [];
 
-  const { skill = 'listening', useAiForAnswers = false, language = 'en' } = options;
-  const passageContext = extractPassageTextFromPart(text);
   const lines = String(text).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const questions = [];
   let i = 0;
@@ -434,15 +430,7 @@ export async function extractQuestionsFromPart(text, options = {}) {
         }
       }
 
-      // For reading skill, if still no answer, use AI
-      if (skill === 'reading' && !correctAnswer && useAiForAnswers && currentOptions.length > 0) {
-        try {
-          correctAnswer = await findCorrectAnswerWithAi(questionText, currentOptions, passageContext, language);
-        } catch (aiError) {
-          console.error(`[AI Answer] Failed for question "${questionText.substring(0, 50)}...":`, aiError.message);
-        }
-      }
-
+      // Không có đáp án trong đề / bảng đáp án thì để trống cho admin chọn — không đoán bằng AI.
       questions.push({ question: questionText, options: currentOptions, correctAnswer });
       continue;
     }
@@ -469,37 +457,6 @@ const parseAnswerKey = (text) => {
     }
   }
   return key;
-};
-
-// New helper to use AI for finding the correct answer
-const findCorrectAnswerWithAi = async (question, options, passageContext = '', language = 'en') => {
-  const isJapanese = String(language || '').toLowerCase().startsWith('ja');
-  const systemInstruction = isJapanese
-    ? 'You are an expert in Japanese reading comprehension. Your task is to identify the single best answer for a multiple-choice question based on the provided context. The user will provide a question and a list of options. You must choose one of the provided options. Respond with only the exact text of the correct option, and nothing else. Do not add any explanation or introductory text.'
-    : 'You are an expert in English language and reading comprehension. Your task is to identify the single best answer for a multiple-choice question based on the provided context. The user will provide a question and a list of options. You must choose one of the provided options. Respond with only the exact text of the correct option, and nothing else. Do not add any explanation or introductory text.';
-  
-  const userPrompt = `${isJapanese ? 'Japanese' : 'Reading'} passage/context:
-"${String(passageContext || '').trim()}"
-
-Question: "${question}"
-
-Options:
-${options.map((opt, i) => `- ${opt}`).join('\n')}
-
-Based on general knowledge and the context implied by the question, which option is the most logical and correct answer? Respond with the full text of that option only.`;
-
-  const result = await generateGeminiText({
-    systemInstruction,
-    userPrompt,
-    temperature: 0.1,
-    maxOutputTokens: 50
-  });
-
-  const aiAnswer = String(result || '').trim();
-  // Find the closest match in the original options to avoid hallucinations
-  const bestMatch = options.find(opt => aiAnswer.includes(opt) || opt.includes(aiAnswer));
-  
-  return bestMatch || null;
 };
 
 

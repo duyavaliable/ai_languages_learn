@@ -28,7 +28,10 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status;
-    if (status === 401 || status === 403) {
+    // Đăng nhập / đăng ký sai trả 401 nhưng KHÔNG phải hết phiên: để trang tự hiện lỗi
+    // ("sai mật khẩu"…), không xoá phiên và tải lại /login (tải lại làm mất thông báo lỗi).
+    const authForm = /\/auth\/(login|register|google)/.test(String(error.config?.url || ''));
+    if ((status === 401 || status === 403) && !authForm) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';

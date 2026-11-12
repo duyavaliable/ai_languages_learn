@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import DocxExamReview from '../components/admin/DocxExamReview';
+import ScanExamReview, { audioPlan } from '../components/admin/ScanExamReview';
 
 const CEFR_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 const SKILL_OPTIONS = [
@@ -13,9 +15,33 @@ const JAPANESE_SKILL_OPTIONS = [
   { value: 'vocabulary', label: 'Từ vựng' },
   { value: 'grammar', label: 'Ngữ pháp' },
   { value: 'reading', label: 'Đọc' },
-  { value: 'listening', label: 'Nghe' }
+  { value: 'listening', label: 'Nghe' },
+  { value: 'speaking', label: 'Nói (luyện hội thoại)' }
 ];
 const JAPANESE_PART_OPTIONS = ['N5', 'N4', 'N3', 'N2', 'N1'];
+
+/**
+ * Kỹ năng NÓI đi đường khác hẳn các kỹ năng còn lại — đọc trước khi sửa.
+ *
+ * Nghe / Đọc / Viết / Ngữ pháp / Từ vựng: tải file đề PDF-DOCX, hệ thống quét
+ * rồi tách thành câu hỏi. **Giữ nguyên, không đụng vào.**
+ *
+ * Nói: model chấm phát âm so bản ghi với một VĂN BẢN ĐÍCH biết trước, nên
+ * không có "đề" để quét — chỉ có câu người học phải đọc. Giáo viên nhập thẳng
+ * từng dòng, lưu vào bảng `speaking_passages`. Mỗi dòng là MỘT lần đọc, chấm
+ * riêng từng dòng.
+ */
+const SPEAKING_SKILL = 'speaking';
+
+const defaultSpeakingPassage = {
+  kind: 'passage',
+  title: '',
+  topic: '',
+  level: '',
+  content: '',
+  source: '',
+  license: ''
+};
 
 const defaultCourse = {
   language_id: '',
@@ -25,16 +51,8 @@ const defaultCourse = {
   duration: ''
 };
 
-const defaultLesson = {
-  language_id: '',
-  title: '',
-  content: '',
-  lesson_order: 1
-};
-
 const defaultExercise = {
   course_id: '',
-  lesson_id: '',
   title: '',
   skill: 'reading',
   cefrLevel: 'A2',
@@ -43,8 +61,6 @@ const defaultExercise = {
 
 const defaultVocabulary = {
   language_id: '',
-  lesson_id: '',
-  lesson_title: '',
   word: '',
   pronunciation: '',
   meaning: '',
@@ -54,16 +70,25 @@ const defaultVocabulary = {
 
 const toCefrLevel = (value) => String(value || '').trim().toUpperCase();
 
-function TeacherCreateContent() {
+/**
+ * Công cụ tạo bài / nhập từ vựng của ADMIN.
+ *
+ * `embedded`: hiện bên trong trang Quản lý nội dung (bấm "Tạo bài mới") —
+ * bỏ header, khối số liệu và nền riêng, chỉ giữ phần công cụ.
+ */
+function TeacherCreateContent({ embedded = false, onCreated } = {}) {
   const navigate = useNavigate();
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const [mode, setMode] = useState('vocabulary');
 
   const [languages, setLanguages] = useState([]);
   const [courses, setCourses] = useState([]);
-  const [exerciseLessons, setExerciseLessons] = useState([]);
-  const [vocabularyLessons, setVocabularyLessons] = useState([]);
   const [vocabularies, setVocabularies] = useState([]);
+  // Thung rac tu vung. DELETE la xoa MEM (dat is_deleted=1), ban ghi van con
+  // trong CSDL; xoa han la buoc rieng va chi admin lam duoc.
+  const [deletedVocabularies, setDeletedVocabularies] = useState([]);
+  const [showDeletedVocab, setShowDeletedVocab] = useState(false);
+  const [vocabBusyId, setVocabBusyId] = useState(null);
   const [vocabularyFile, setVocabularyFile] = useState(null);
   const [vocabularyPreviewRows, setVocabularyPreviewRows] = useState([]);
   const [vocabularyPreviewRaw, setVocabularyPreviewRaw] = useState('');
@@ -73,7 +98,6 @@ function TeacherCreateContent() {
   const [vocabularySaveLoading, setVocabularySaveLoading] = useState(false);
 
   const [courseForm, setCourseForm] = useState(defaultCourse);
-  const [lessonForm, setLessonForm] = useState(defaultLesson);
   const [exerciseForm, setExerciseForm] = useState(defaultExercise);
   const [vocabularyForm, setVocabularyForm] = useState(defaultVocabulary);
 
@@ -81,20 +105,36 @@ function TeacherCreateContent() {
   const [createdExerciseInfos, setCreatedExerciseInfos] = useState([]);
   const [listeningAudioFile, setListeningAudioFile] = useState(null);
   const [generateLoading, setGenerateLoading] = useState(false);
-  const [exerciseLessonLoading, setExerciseLessonLoading] = useState(false);
+  // Bài đọc cho kỹ năng NÓI — đường riêng, xem ghi chú ở SPEAKING_SKILL.
+  const [speakingForm, setSpeakingForm] = useState(defaultSpeakingPassage);
+  const [speakingSaving, setSpeakingSaving] = useState(false);
+  const [speakingMsg, setSpeakingMsg] = useState(null);
   const [exerciseFile, setExerciseFile] = useState(null);
   const [exerciseParts, setExerciseParts] = useState([]);
   const [exercisePreviewLoading, setExercisePreviewLoading] = useState(false);
   const [exerciseSelectedParts, setExerciseSelectedParts] = useState([]);
-  const [vocabularyLessonLoading, setVocabularyLessonLoading] = useState(false);
   const [vocabularyLoading, setVocabularyLoading] = useState(false);
   const [vocabularyMsg, setVocabularyMsg] = useState(null);
   const [vocabularyPreviewMsg, setVocabularyPreviewMsg] = useState(null);
   const [editingVocabulary, setEditingVocabulary] = useState(null);
   const [selectedPartForDetail, setSelectedPartForDetail] = useState(null);
+  // Đề trắc nghiệm Word (.docx) Đọc / Nghe: kết quả quét chờ admin duyệt
+  const [docxExam, setDocxExam] = useState(null);
+  const [docxSaving, setDocxSaving] = useState(false);
+  // Đề PDF quét Đọc / Nghe: phiên quét chạy nền trên server, xong thì admin duyệt
+  const [scanKeyFile, setScanKeyFile] = useState(null);
+  const [scanPages, setScanPages] = useState('');
+  const [scanKeyPages, setScanKeyPages] = useState('');
+  const [scanJob, setScanJob] = useState(null);       // { id, status, progress, queuePosition, log }
+  const [scanExam, setScanExam] = useState(null);
+  const scanCarry = useRef({});
+  // lỗi khi lưu đề quét: { text, id } — id mới mỗi lần để hộp lỗi giữa màn hình hiện lại kể cả khi trùng lỗi cũ
+  const [scanSaveError, setScanSaveError] = useState(null);
+  const [scanSaving, setScanSaving] = useState(false);
 
   useEffect(() => {
-    if (currentUser.role !== 'teacher') {
+    // Chỉ admin tạo bài (vai trò teacher đã bỏ).
+    if (currentUser.role !== 'admin') {
       navigate('/');
       return;
     }
@@ -103,47 +143,62 @@ function TeacherCreateContent() {
     fetchCourses();
   }, []);
 
+  // Hỏi tiến độ phiên quét PDF 3 giây một lần cho tới khi xong / lỗi.
+  const scanJobId = scanJob?.id;
+  const scanActive = scanJob && (scanJob.status === 'queued' || scanJob.status === 'running');
+  useEffect(() => {
+    if (!scanJobId || !scanActive) return undefined;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const res = await api.get(`/exercises/scan-status/${scanJobId}`);
+        if (stop) return;
+        const job = res.data;
+        if (job.status === 'done') {
+          setScanJob(job);
+          // gắn đáp án sau khi quét: giữ lại file nghe / tên phần admin đã chọn ở bước duyệt
+          setScanExam(job.result ? { ...job.result, ...scanCarry.current } : job.result);
+          scanCarry.current = {};
+          const r = job.result || {};
+          const n = r.questions?.length || 0;
+          const img = (r.questions || []).filter((q) => q.display === 'image').length;
+          const ans = (r.questions || []).filter((q) => q.correctAnswer).length;
+          setMessage({ type: n ? 'success' : 'info', text: n
+            ? `Quét xong: ${n} câu (${img} câu hiện ảnh gốc vì máy đọc không chắc), ${ans}/${n} câu có đáp án. Kiểm tra rồi bấm Lưu bài.`
+            : 'Quét xong nhưng không nhận ra câu hỏi nào. Kiểm tra lại số trang đề.' });
+        } else if (job.status === 'error') {
+          setScanJob(job);
+          setMessage({ type: 'error', text: `Quét thất bại: ${job.error || 'lỗi không rõ'}` });
+        } else {
+          setScanJob(job);
+        }
+      } catch (err) {
+        if (stop) return;
+        setScanJob((j) => (j ? { ...j, status: 'error', error: err.response?.data?.message || 'Mất kết nối tới server' } : j));
+        setMessage({ type: 'error', text: err.response?.data?.message || 'Không hỏi được tiến độ quét' });
+      }
+    };
+    const timer = setInterval(tick, 3000);
+    tick();
+    return () => { stop = true; clearInterval(timer); };
+  }, [scanJobId, scanActive]);
+
   const fetchCourses = () => {
     api.get('/courses').then((res) => setCourses(res.data)).catch(() => {});
   };
 
-  const fetchLessonsForCourse = (courseId, setLessons, setLoading) => {
-    if (!courseId) {
-      setLessons([]);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    api.get(`/lessons?courseId=${courseId}`)
-      .then((res) => setLessons(res.data || []))
-      .catch(() => setLessons([]))
-      .finally(() => setLoading(false));
-  };
-
-  const fetchLessonsForLanguage = (languageId, setLessons, setLoading) => {
+  // Tu vung gan vao NGON NGU, khong gan vao bai hoc (xem models/Vocabulary.js).
+  // Truoc day ham nay goi `?lessonId=` -> backend bo qua tham so do nen danh
+  // sach tra ve TOAN BO tu cua moi ngon ngu, khong loc gi.
+  const fetchVocabulary = (languageId) => {
     if (!languageId) {
-      setLessons([]);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    api.get(`/lessons?languageId=${languageId}`)
-      .then((res) => setLessons(res.data || []))
-      .catch(() => setLessons([]))
-      .finally(() => setLoading(false));
-  };
-
-  const fetchVocabulary = (lessonId) => {
-    if (!lessonId) {
       setVocabularies([]);
       setVocabularyLoading(false);
       return;
     }
 
     setVocabularyLoading(true);
-    api.get(`/vocabulary?lessonId=${lessonId}`)
+    api.get(`/vocabulary?languageId=${languageId}`)
       .then((res) => setVocabularies(res.data || []))
       .catch(() => setVocabularies([]))
       .finally(() => setVocabularyLoading(false));
@@ -155,12 +210,6 @@ function TeacherCreateContent() {
     setVocabularyPreviewRaw('');
     setVocabularyParseMeta(null);
     setVocabularyPreviewMsg(null);
-  };
-
-  const lessonLabel = (lesson) => {
-    if (!lesson) return '';
-    const prefix = lesson.lesson_order ? `Lesson ${lesson.lesson_order}` : 'Lesson';
-    return `${prefix}: ${lesson.title}`;
   };
 
   const selectedExerciseLanguage = languages.find((lang) => String(lang.id) === String(exerciseForm.language_id));
@@ -211,25 +260,6 @@ function TeacherCreateContent() {
       i += 1;
     }
     return questions;
-  };
-
-  const syncExerciseLesson = (courseId, lessonId = '') => {
-    const courseLessons = exerciseLessons.length > 0 ? exerciseLessons : [];
-    const lesson = courseLessons.find((item) => String(item.id) === String(lessonId));
-    setExerciseForm((prev) => ({
-      ...prev,
-      course_id: courseId,
-      lesson_id: lessonId,
-      title: lesson ? lessonLabel(lesson) : ''
-    }));
-  };
-
-  const syncVocabularyLesson = (courseId, lessonId = '') => {
-    setVocabularyForm((prev) => ({
-      ...prev,
-      language_id: courseId,
-      lesson_id: lessonId
-    }));
   };
 
   const showMsg = (type, text) => setMessage({ type, text });
@@ -284,23 +314,62 @@ function TeacherCreateContent() {
     }
   };
 
-  const submitLesson = async (e) => {
+  /**
+   * Lưu một bài đọc cho kỹ năng NÓI vào bảng `speaking_passages`.
+   *
+   * Không đi qua `/exercises/create-from-parts` vì không có file đề để quét —
+   * văn bản đích do giáo viên nhập thẳng.
+   *
+   * KHÔNG gửi `has_prosody_ref`: server tự xác minh bằng cách hỏi dịch vụ chấm
+   * xem câu nào thật sự có mốc người bản ngữ. Để client khai thì giao diện sẽ
+   * hứa tiêu chí Ngữ điệu mà model không trả về.
+   */
+  const submitSpeakingPassage = async (e) => {
     e.preventDefault();
-    setMessage(null);
+    setSpeakingMsg(null);
+
+    const title = String(speakingForm.title || '').trim();
+    const content = String(speakingForm.content || '').trim();
+    if (!title) {
+      setSpeakingMsg({ type: 'error', text: 'Nhập tên bài trước đã.' });
+      return;
+    }
+    if (!content) {
+      setSpeakingMsg({ type: 'error', text: 'Nhập ít nhất một dòng để đọc.' });
+      return;
+    }
+    if (!exerciseForm.language_id) {
+      setSpeakingMsg({ type: 'error', text: 'Chọn ngôn ngữ trước đã.' });
+      return;
+    }
+
+    setSpeakingSaving(true);
     try {
-      const createdCourseId = lessonForm.course_id;
-      await api.post('/lessons/teacher-create', {
-        ...lessonForm,
-        lesson_order: Number(lessonForm.lesson_order || 1)
+      const res = await api.post('/speaking-passages', {
+        language_id: Number(exerciseForm.language_id),
+        kind: speakingForm.kind,
+        title,
+        topic: speakingForm.topic || null,
+        level: speakingForm.level || null,
+        content,                       // server tự tách dòng, hiểu "Vai: nội dung"
+        source: speakingForm.source || null,
+        license: speakingForm.license || null
       });
-      setLessonForm((prev) => ({ ...defaultLesson, course_id: prev.course_id }));
-      fetchCourses();
-      if (String(exerciseForm.course_id) === String(createdCourseId)) {
-        fetchLessonsForCourse(createdCourseId, setExerciseLessons, setExerciseLessonLoading);
-      }
-      showMsg('success', 'Tạo chủ đề thành công');
+      const d = res.data || {};
+      const nLines = Array.isArray(d.lines) ? d.lines.length : 0;
+      const note = d.prosody_note ? ` ${d.prosody_note}` : '';
+      setSpeakingMsg({
+        type: 'success',
+        text: `Đã lưu "${title}" với ${nLines} dòng.${note}`
+      });
+      setSpeakingForm(defaultSpeakingPassage);
     } catch (err) {
-      showMsg('error', err.response?.data?.message || 'Tạo chủ đề thất bại');
+      setSpeakingMsg({
+        type: 'error',
+        text: err?.response?.data?.message || err.message || 'Không lưu được bài đọc.'
+      });
+    } finally {
+      setSpeakingSaving(false);
     }
   };
 
@@ -374,6 +443,8 @@ function TeacherCreateContent() {
       setCreatedExerciseInfos(createdItems);
       setListeningAudioFile(null);
       showMsg('success', `Đã tạo và lưu ${createdItems.length} bài tập vào kho bài tập.`);
+      // Nhúng trong Quản lý nội dung: báo để danh sách bài tải lại.
+      if (onCreated) onCreated(createdItems);
     } catch (err) {
       const detail = err?.response?.data?.message || err?.message || 'Tạo exercise thất bại';
       console.error('[TeacherCreateContent] Exercise generation failed', {
@@ -436,33 +507,16 @@ function TeacherCreateContent() {
     setVocabularyForm((prev) => ({
       ...prev,
       language_id: languageId,
-      lesson_id: '',
-      lesson_title: '',
       word: '',
       pronunciation: '',
       meaning: '',
       example_sentence: '',
       example_translation: ''
     }));
-    setVocabularyLessons([]);
     setVocabularies([]);
     resetVocabularyPreview();
-    fetchLessonsForLanguage(languageId, setVocabularyLessons, setVocabularyLessonLoading);
-  };
-
-  const handleVocabularyLessonChange = (lessonId) => {
-    setVocabularyForm((prev) => ({
-      ...prev,
-      lesson_id: lessonId
-    }));
-    resetVocabularyPreview();
-    fetchVocabulary(lessonId);
-  };
-
-  const handleVocabularySelectExistingLesson = (lessonId) => {
-    setVocabularyForm((prev) => ({ ...prev, lesson_id: lessonId, lesson_title: '' }));
-    resetVocabularyPreview();
-    fetchVocabulary(lessonId);
+    // Tu vung gan vao NGON NGU: doi ngon ngu la tai luon danh sach tu.
+    fetchVocabulary(languageId);
   };
 
   const handleVocabularyFileChange = (file) => {
@@ -477,6 +531,171 @@ function TeacherCreateContent() {
     setExerciseFile(file || null);
     setExerciseParts([]);
     setExerciseSelectedParts([]);
+    setDocxExam(null);
+    if (scanJob && (scanJob.status === 'queued' || scanJob.status === 'running')) cancelPdfScan();
+    setScanJob(null);
+    setScanExam(null);
+  };
+
+  // Đề Word cho Đọc / Nghe đi đường riêng: bộ đọc cấu trúc + tự sửa lỗi gõ, rồi admin duyệt.
+  const isDocxExamFlow = (file) => Boolean(file)
+    && /\.docx$/i.test(file.name || '')
+    && ['reading', 'listening'].includes(exerciseForm.skill);
+
+  const previewDocxExam = async () => {
+    setExercisePreviewLoading(true);
+    setDocxExam(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', exerciseFile);
+      const res = await api.post('/exercises/docx-preview', formData, { timeout: 90000 });
+      setDocxExam(res.data);
+      const w = (res.data?.warnings || []).length;
+      showMsg(w ? 'info' : 'success', `Đọc được ${res.data?.questions?.length || 0} câu, tự sửa ${(res.data?.fixes || []).length} chỗ${w ? `, còn ${w} chỗ cần xem lại` : ''}. Kiểm tra rồi bấm Lưu bài.`);
+    } catch (err) {
+      showMsg('error', err.response?.data?.message || 'Không đọc được file Word');
+    } finally {
+      setExercisePreviewLoading(false);
+    }
+  };
+
+  const saveDocxExam = async () => {
+    const manualTitle = String(exerciseForm.title || '').trim();
+    if (!manualTitle) { showMsg('error', 'Vui lòng nhập tên bài trước khi lưu.'); return; }
+    setDocxSaving(true);
+    try {
+      const formData = new FormData();
+      if (exerciseForm.course_id) formData.append('course_id', String(Number(exerciseForm.course_id)));
+      if (exerciseForm.language_id) formData.append('language_id', String(exerciseForm.language_id));
+      formData.append('exerciseTitle', manualTitle);
+      formData.append('skill', exerciseForm.skill);
+      formData.append('sourceFile', docxExam.fileName || '');
+      formData.append('exam', JSON.stringify({ header: docxExam.header, timeLimitSec: docxExam.timeLimitSec, questions: docxExam.questions }));
+      if (exerciseForm.skill === 'listening' && listeningAudioFile) formData.append('audioFile', listeningAudioFile);
+      const res = await api.post('/exercises/docx-create', formData, { timeout: 60000 });
+      const created = res.data?.created || [];
+      showMsg('success', `Đã lưu bài "${manualTitle}" (${created[0]?.questionCount || 0} câu) vào kho bài tập.`);
+      setDocxExam(null);
+      setExerciseFile(null);
+      setListeningAudioFile(null);
+      if (onCreated) onCreated(created);
+    } catch (err) {
+      showMsg('error', err.response?.data?.message || 'Lưu bài thất bại');
+    } finally {
+      setDocxSaving(false);
+    }
+  };
+
+  // Đề PDF cho Đọc / Nghe: bộ quét OCR trên server (đọc cả PDF scan), rồi admin duyệt.
+  const isPdfScanFlow = (file) => Boolean(file)
+    && /\.pdf$/i.test(file.name || '')
+    && ['reading', 'listening'].includes(exerciseForm.skill);
+
+  const startPdfScan = async () => {
+    setScanSaveError(null);
+    setScanExam(null);
+    setScanJob(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', exerciseFile);
+      if (scanKeyFile) formData.append('keyFile', scanKeyFile);
+      formData.append('skill', exerciseForm.skill);
+      if (exerciseForm.language_id) formData.append('language_id', String(exerciseForm.language_id));
+      if (scanPages.trim()) formData.append('pages', scanPages.trim());
+      if (scanKeyPages.trim()) formData.append('keyPages', scanKeyPages.trim());
+      const res = await api.post('/exercises/scan-start', formData, { timeout: 120000 });
+      setScanJob({ id: res.data.jobId, status: 'queued', progress: { done: 0, total: 0, step: 'đang chờ lượt quét' } });
+      showMsg('info', 'Đã bắt đầu quét đề. Mỗi trang mất khoảng nửa phút; có thể để trang này mở và chờ.');
+    } catch (err) {
+      showMsg('error', err.response?.data?.message || 'Không bắt đầu quét được');
+    }
+  };
+
+  // Quét xong mà thiếu đáp án: gắn file đáp án / trang đáp án, server chỉ đọc lại bảng đáp án
+  // trên kết quả OCR đã có (không quét lại đề).
+  const attachScanKey = async (keyFile, keyPages) => {
+    const id = scanExam?.jobId;
+    if (!id) return;
+    try {
+      const formData = new FormData();
+      if (keyFile) formData.append('keyFile', keyFile);
+      if (keyPages) formData.append('keyPages', keyPages);
+      await api.post(`/exercises/scan-key/${id}`, formData, { timeout: 120000 });
+      const { wholeAudio, partAudio, partTitles, split, timeLimitSec } = scanExam;
+      scanCarry.current = { wholeAudio, partAudio, partTitles, split, timeLimitSec };
+      setScanExam(null);
+      setScanJob({ id, status: 'queued', progress: { done: 0, total: 0, step: 'đang đọc bảng đáp án' } });
+      showMsg('info', 'Đang đọc bảng đáp án (dùng lại kết quả quét đề, không quét lại)…');
+    } catch (err) {
+      showMsg('error', err.response?.data?.message || 'Không gắn được file đáp án');
+    }
+  };
+
+  const cancelPdfScan = async () => {
+    const id = scanJob?.id;
+    setScanJob(null);
+    setScanExam(null);
+    if (id) await api.delete(`/exercises/scan/${id}`).catch(() => {});
+  };
+
+  const saveScanExam = async () => {
+    const manualTitle = String(exerciseForm.title || '').trim();
+    if (!manualTitle) {
+      setScanSaveError({ text: 'Chưa nhập tên bài (ô "Tên bài" ở đầu form).', id: Date.now() });
+      showMsg('error', 'Vui lòng nhập tên bài trước khi lưu.');
+      return;
+    }
+    setScanSaveError(null);
+    setScanSaving(true);
+    try {
+      const formData = new FormData();
+      if (exerciseForm.course_id) formData.append('course_id', String(Number(exerciseForm.course_id)));
+      if (exerciseForm.language_id) formData.append('language_id', String(exerciseForm.language_id));
+      formData.append('exerciseTitle', manualTitle);
+      formData.append('skill', exerciseForm.skill);
+      formData.append('jobId', scanExam.jobId);
+      formData.append('sourceFile', scanExam.fileName || '');
+      // bỏ phần ghi chú cho admin (`review`), chỉ gửi nội dung câu hỏi
+      const listening = exerciseForm.skill === 'listening';
+      // file nghe: mỗi phần một file (chọn ở dòng của phần) và/hoặc một file chung cho cả đề
+      const plan = listening ? audioPlan(scanExam.questions, scanExam.wholeAudio, scanExam.partAudio) : { files: [], indexes: null };
+      formData.append('exam', JSON.stringify({
+        timeLimitSec: scanExam.timeLimitSec,
+        questions: scanExam.questions.map(({ review, ...q }, i) => (
+          plan.indexes ? { ...q, audioIndex: plan.indexes[i] } : q
+        ))
+      }));
+      plan.files.forEach((f) => formData.append('audioFiles', f));
+      // tách mỗi phần thành một bài (mặc định khi đề có nhiều phần)
+      formData.append('split', String(scanExam.split !== false));
+      formData.append('partTitles', JSON.stringify(scanExam.partTitles || []));
+      const res = await api.post('/exercises/scan-create', formData, { timeout: 120000 });
+      const created = res.data?.created || [];
+      showMsg('success', created.length > 1
+        ? `Đã lưu ${created.length} bài: ${created.map((c) => `"${c.exerciseTitle}" (${c.questionCount} câu)`).join(', ')}.`
+        : `Đã lưu bài "${created[0]?.exerciseTitle || manualTitle}" (${created[0]?.questionCount || 0} câu) vào kho bài tập.`);
+      // lưu xong: đóng màn duyệt, trả form tạo bài về trống (giữ ngôn ngữ / kỹ năng / khoá học để tạo bài tiếp),
+      // cuộn lên đầu để thấy thông báo
+      setScanExam(null);
+      setScanJob(null);
+      setExerciseFile(null);
+      setScanKeyFile(null);
+      setScanPages('');
+      setScanKeyPages('');
+      setScanSaveError(null);
+      setListeningAudioFile(null);
+      setExerciseForm((prev) => ({ ...prev, title: '' }));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (onCreated) onCreated(created);
+    } catch (err) {
+      const msg = err.response?.data?.message || err.response?.data?.error
+        || (err.code === 'ECONNABORTED' ? 'Hết thời gian chờ khi gửi file (file nghe quá lớn hoặc mạng chậm)' : 'Lưu bài thất bại');
+      const list = err.response?.data?.problems;
+      setScanSaveError({ text: msg, problems: Array.isArray(list) ? list : [], id: Date.now() });
+      showMsg('error', msg);
+    } finally {
+      setScanSaving(false);
+    }
   };
 
   const previewExerciseFile = async () => {
@@ -484,6 +703,8 @@ function TeacherCreateContent() {
       showMsg('error', 'Vui lòng chọn file PDF hoặc DOCX.');
       return;
     }
+    if (isDocxExamFlow(exerciseFile)) { await previewDocxExam(); return; }
+    if (isPdfScanFlow(exerciseFile)) { await startPdfScan(); return; }
     setExercisePreviewLoading(true);
     try {
       const formData = new FormData();
@@ -553,24 +774,8 @@ function TeacherCreateContent() {
   };
 
   const importPreviewVocabulary = async () => {
-    // ensure lesson exists: if teacher provided a title, create the lesson first
-    let lessonId = vocabularyForm.lesson_id;
-    try {
-      if (!lessonId) {
-        const title = String(vocabularyForm.lesson_title || '').trim();
-        if (!title) {
-          setVocabularyPreviewMsg({ type: 'error', text: 'Vui lòng chọn hoặc nhập tên lesson trước khi lưu.' });
-          return;
-        }
-        const languageId = vocabularyForm.language_id || (languages[0] && languages[0].id);
-        const lessonRes = await api.post('/lessons/teacher-create', { language_id: languageId, title });
-        lessonId = lessonRes.data?.id;
-        // refresh lesson list
-        fetchLessonsForLanguage(languageId, setVocabularyLessons, setVocabularyLessonLoading);
-        setVocabularyForm((prev) => ({ ...prev, lesson_id: lessonId }));
-      }
-    } catch (err) {
-      setVocabularyPreviewMsg({ type: 'error', text: err.response?.data?.message || 'Không thể tạo lesson tự động' });
+    if (!vocabularyForm.language_id) {
+      setVocabularyPreviewMsg({ type: 'error', text: 'Chọn ngôn ngữ trước khi lưu.' });
       return;
     }
 
@@ -591,15 +796,17 @@ function TeacherCreateContent() {
 
     setVocabularySaveLoading(true);
     try {
+      // Tu vung gan vao NGON NGU, khong gan vao bai hoc (xem
+      // models/Vocabulary.js). Truoc day gui `lesson_id` -> backend tra 400.
       await api.post('/vocabulary/import-batch', {
-        lesson_id: Number(lessonId),
+        language_id: vocabularyForm.language_id ? Number(vocabularyForm.language_id) : null,
         items: normalizedItems
       });
 
       setVocabularyMsg({ type: 'success', text: `Đã lưu ${normalizedItems.length} từ vựng từ file.` });
       setVocabularyPreviewMsg({ type: 'success', text: 'Lưu thành công. Bảng preview đã được làm mới.' });
       resetVocabularyPreview();
-      fetchVocabulary(lessonId);
+      fetchVocabulary(vocabularyForm.language_id);
     } catch (err) {
       setVocabularyPreviewMsg({ type: 'error', text: err.response?.data?.message || 'Lưu từ vựng từ file thất bại' });
     } finally {
@@ -607,15 +814,74 @@ function TeacherCreateContent() {
     }
   };
 
+  /** Tai danh sach tu da xoa mem (thung rac). */
+  const fetchDeletedVocabulary = (languageId) => {
+    api.get(`/vocabulary/deleted${languageId ? `?languageId=${languageId}` : ''}`)
+      .then((res) => setDeletedVocabularies(res.data || []))
+      .catch(() => setDeletedVocabularies([]));
+  };
+
+  /**
+   * Xoa MEM mot tu. Ban ghi van con trong CSDL va khoi phuc duoc, nen khong
+   * can hoi xac nhan gat gao — chi bao ro la co the hoan tac.
+   */
+  const handleDeleteVocabulary = async (item) => {
+    if (!window.confirm(`Xóa từ "${item.word}"? Từ sẽ vào thùng rác và khôi phục lại được.`)) return;
+    setVocabBusyId(item.id);
+    try {
+      await api.delete(`/vocabulary/${item.id}`);
+      setVocabularyMsg({ type: 'success', text: `Đã chuyển "${item.word}" vào thùng rác.` });
+      fetchVocabulary(vocabularyForm.language_id);
+      if (showDeletedVocab) fetchDeletedVocabulary(vocabularyForm.language_id);
+    } catch (err) {
+      setVocabularyMsg({ type: 'error', text: err.response?.data?.message || 'Xóa thất bại' });
+    } finally {
+      setVocabBusyId(null);
+    }
+  };
+
+  const handleRestoreVocabulary = async (item) => {
+    setVocabBusyId(item.id);
+    try {
+      await api.patch(`/vocabulary/${item.id}/restore`);
+      setVocabularyMsg({ type: 'success', text: `Đã khôi phục "${item.word}".` });
+      fetchDeletedVocabulary(vocabularyForm.language_id);
+      fetchVocabulary(vocabularyForm.language_id);
+    } catch (err) {
+      setVocabularyMsg({ type: 'error', text: err.response?.data?.message || 'Khôi phục thất bại' });
+    } finally {
+      setVocabBusyId(null);
+    }
+  };
+
+  /**
+   * Xoa HAN khoi CSDL. Khong hoan tac duoc.
+   *
+   * Chi hoi xac nhan mot lan. An toan van con o cho khac: muon toi duoc day
+   * thi tu phai DA nam trong thung rac (backend tu choi xoa han mot tu dang
+   * dung), nen khong the mat du lieu chi bang mot lan bam nham.
+   */
+  const handlePurgeVocabulary = async (item) => {
+    if (!window.confirm(`XÓA HẲN "${item.word}" khỏi cơ sở dữ liệu?
+
+Không khôi phục lại được.`)) return;
+    setVocabBusyId(item.id);
+    try {
+      await api.delete(`/vocabulary/${item.id}/permanent`);
+      setVocabularyMsg({ type: 'success', text: `Đã xóa hẳn "${item.word}".` });
+      fetchDeletedVocabulary(vocabularyForm.language_id);
+    } catch (err) {
+      setVocabularyMsg({ type: 'error', text: err.response?.data?.message || 'Xóa hẳn thất bại' });
+    } finally {
+      setVocabBusyId(null);
+    }
+  };
+
   const handleEditVocabulary = (item) => {
     setEditingVocabulary(item.id);
-    const nextLanguageId = item.lesson?.language_id ? String(item.lesson.language_id) : '';
-    const nextLessonId = item.lesson_id ? String(item.lesson_id) : '';
-    const nextLessonTitle = item.lesson?.title || '';
+    const nextLanguageId = item.language_id ? String(item.language_id) : '';
     setVocabularyForm({
       language_id: nextLanguageId,
-      lesson_id: nextLessonId,
-      lesson_title: nextLessonTitle,
       word: item.word || '',
       pronunciation: item.pronunciation || '',
       meaning: item.meaning || '',
@@ -624,10 +890,7 @@ function TeacherCreateContent() {
     });
     setMode('vocabulary');
     if (nextLanguageId) {
-      fetchLessonsForLanguage(nextLanguageId, setVocabularyLessons, setVocabularyLessonLoading);
-    }
-    if (nextLessonId) {
-      fetchVocabulary(nextLessonId);
+      fetchVocabulary(nextLanguageId);
     }
   };
 
@@ -635,9 +898,7 @@ function TeacherCreateContent() {
     setEditingVocabulary(null);
     setVocabularyForm((prev) => ({
       ...defaultVocabulary,
-      language_id: prev.language_id,
-      lesson_id: prev.lesson_id,
-      lesson_title: prev.lesson_title
+      language_id: prev.language_id
     }));
   };
 
@@ -645,8 +906,8 @@ function TeacherCreateContent() {
     e.preventDefault();
     setVocabularyMsg(null);
 
-    if (!vocabularyForm.lesson_id && !String(vocabularyForm.lesson_title || '').trim()) {
-      setVocabularyMsg({ type: 'error', text: 'Vui lòng chọn lesson hoặc nhập tên lesson trước khi lưu từ.' });
+    if (!vocabularyForm.language_id) {
+      setVocabularyMsg({ type: 'error', text: 'Vui lòng chọn ngôn ngữ trước khi lưu từ.' });
       return;
     }
     if (!vocabularyForm.word.trim() || !vocabularyForm.meaning.trim()) {
@@ -654,25 +915,9 @@ function TeacherCreateContent() {
       return;
     }
 
-    // if lesson id missing but title present, create lesson
-    let lessonId = vocabularyForm.lesson_id;
-    if (!lessonId) {
-      try {
-        const languageId = vocabularyForm.language_id || (languages[0] && languages[0].id);
-        const title = String(vocabularyForm.lesson_title || '').trim();
-        const lessonRes = await api.post('/lessons/teacher-create', { language_id: languageId, title });
-        lessonId = lessonRes.data?.id;
-        fetchLessonsForLanguage(languageId, setVocabularyLessons, setVocabularyLessonLoading);
-        setVocabularyForm((prev) => ({ ...prev, lesson_id: lessonId }));
-      } catch (err) {
-        setVocabularyMsg({ type: 'error', text: err.response?.data?.message || 'Không thể tạo lesson tự động' });
-        return;
-      }
-    }
-
     try {
       const payload = {
-        lesson_id: Number(lessonId),
+        language_id: vocabularyForm.language_id ? Number(vocabularyForm.language_id) : null,
         word: vocabularyForm.word,
         pronunciation: vocabularyForm.pronunciation,
         meaning: vocabularyForm.meaning,
@@ -688,33 +933,34 @@ function TeacherCreateContent() {
         setVocabularyMsg({ type: 'success', text: 'Tạo từ vựng thành công' });
       }
 
-      fetchVocabulary(vocabularyForm.lesson_id);
+      fetchVocabulary(vocabularyForm.language_id);
       setEditingVocabulary(null);
       setVocabularyForm((prev) => ({
         ...defaultVocabulary,
-        course_id: prev.course_id,
-        lesson_id: prev.lesson_id
+        language_id: prev.language_id
       }));
     } catch (err) {
       setVocabularyMsg({ type: 'error', text: err.response?.data?.message || 'Lưu từ vựng thất bại' });
     }
   };
 
-  const selectedVocabularyLesson = vocabularyLessons.find((lesson) => String(lesson.id) === String(vocabularyForm.lesson_id));
 
   return (
-    <div style={styles.wrapper}>
+    <div style={embedded ? undefined : styles.wrapper}>
+      {!embedded && (
       <div style={styles.header}>
         <div style={styles.headerLeft}>
-          <button onClick={() => navigate('/')} style={styles.backBtn}>← Quay lại</button>
+          <button onClick={() => navigate('/admin/content')} style={styles.backBtn}>← Quay lại</button>
           <div>
-            <div style={styles.logo}>Teacher Workspace</div>
+            <div style={styles.logo}>Tạo nội dung</div>
           </div>
         </div>
-        <span style={styles.welcomeText}>Giáo viên: <strong>{currentUser.username}</strong></span>
+        <span style={styles.welcomeText}>Admin: <strong>{currentUser.username}</strong></span>
       </div>
+      )}
 
-      <div style={styles.content}>
+      <div style={embedded ? undefined : styles.content}>
+        {!embedded && (
         <div style={styles.hero}>
           <div style={styles.heroStats}>
             <div style={styles.statCard}>
@@ -727,6 +973,7 @@ function TeacherCreateContent() {
             </div>
           </div>
         </div>
+        )}
 
         <div style={styles.mainPanel}>
             <div style={styles.panelHeader}>
@@ -781,30 +1028,6 @@ function TeacherCreateContent() {
           </div>
         )}
 
-        {false && mode === 'lesson' && (
-          <div style={styles.card}>
-            <h3 style={styles.cardTitle}>Tạo Lesson / Chủ đề</h3>
-            <form onSubmit={submitLesson}>
-              <label style={styles.label}>Course</label>
-              <select style={styles.input} value={lessonForm.course_id} onChange={(e) => setLessonForm((p) => ({ ...p, course_id: e.target.value }))} required>
-                <option value="">-- Chọn course --</option>
-                {courses.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
-              </select>
-
-              <label style={styles.label}>Tên lesson / chủ đề</label>
-              <input style={styles.input} value={lessonForm.title} onChange={(e) => setLessonForm((p) => ({ ...p, title: e.target.value }))} required />
-
-              <label style={styles.label}>Thứ tự</label>
-              <input type="number" min="1" style={styles.input} value={lessonForm.lesson_order} onChange={(e) => setLessonForm((p) => ({ ...p, lesson_order: e.target.value }))} />
-
-              <label style={styles.label}>Nội dung</label>
-              <textarea style={{ ...styles.input, height: '80px', resize: 'vertical' }} value={lessonForm.content} onChange={(e) => setLessonForm((p) => ({ ...p, content: e.target.value }))} />
-
-              <button type="submit" style={styles.submitBtn}>Tạo Chủ đề</button>
-            </form>
-          </div>
-        )}
-
         {mode === 'vocabulary' && (
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Tạo / cập nhật Vocabulary</h3>
@@ -812,46 +1035,23 @@ function TeacherCreateContent() {
 
             {vocabularyMsg && <div style={vocabularyMsg.type === 'success' ? styles.successBanner : styles.errorBanner}>{vocabularyMsg.text}</div>}
             {vocabularyPreviewMsg && <div style={vocabularyPreviewMsg.type === 'success' ? styles.successBanner : styles.errorBanner}>{vocabularyPreviewMsg.text}</div>}
-            {vocabularyLessonLoading && <p style={styles.statusText}>Đang tải lesson...</p>}
 
             <div style={styles.uploadBox}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={styles.label}>Ngôn ngữ</label>
-                  <select
-                    style={styles.input}
-                    value={vocabularyForm.language_id}
-                    onChange={(e) => handleVocabularyLanguageChange(e.target.value)}
-                  >
-                    <option value="">-- Chọn ngôn ngữ --</option>
-                    {languages.map((lang) => (
-                      <option key={lang.id} value={lang.id}>{lang.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label style={styles.label}>Chọn lesson có sẵn (tùy chọn)</label>
-                  <select
-                    style={styles.input}
-                    value={vocabularyForm.lesson_id}
-                    onChange={(e) => handleVocabularySelectExistingLesson(e.target.value)}
-                    disabled={!vocabularyForm.language_id || vocabularyLessonLoading}
-                  >
-                    <option value="">-- Chọn lesson --</option>
-                    {vocabularyLessons.map((lesson) => (
-                      <option key={lesson.id} value={lesson.id}>{lessonLabel(lesson)}</option>
-                    ))}
-                  </select>
-                </div>
+              {/* Tu vung gan vao NGON NGU. Truoc day cho day co them o "Chon
+                * lesson" va "Ten chu de" — da bo cung voi khai niem bai hoc. */}
+              <div>
+                <label style={styles.label}>Ngôn ngữ</label>
+                <select
+                  style={styles.input}
+                  value={vocabularyForm.language_id}
+                  onChange={(e) => handleVocabularyLanguageChange(e.target.value)}
+                >
+                  <option value="">-- Chọn ngôn ngữ --</option>
+                  {languages.map((lang) => (
+                    <option key={lang.id} value={lang.id}>{lang.name}</option>
+                  ))}
+                </select>
               </div>
-
-              <label style={{ ...styles.label, marginTop: '12px' }}>Hoặc nhập tên chủ đề (ví dụ: Healthy)</label>
-              <input
-                style={styles.input}
-                value={vocabularyForm.lesson_title}
-                onChange={(e) => setVocabularyForm((prev) => ({ ...prev, lesson_title: e.target.value, lesson_id: '' }))}
-                placeholder="Nhập tên chủ đề mới hoặc để trống nếu chọn lesson có sẵn"
-              />
 
               <label style={styles.label}>File từ vựng (PDF, DOCX, TXT)</label>
               <input
@@ -924,7 +1124,7 @@ function TeacherCreateContent() {
 
                 <div style={{ marginTop: '12px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                   <button type="button" style={styles.submitBtn} onClick={importPreviewVocabulary} disabled={vocabularySaveLoading}>
-                    {vocabularySaveLoading ? 'Đang lưu...' : 'Lưu toàn bộ vào lesson'}
+                    {vocabularySaveLoading ? 'Đang lưu...' : 'Lưu toàn bộ'}
                   </button>
                 </div>
 
@@ -991,9 +1191,9 @@ function TeacherCreateContent() {
             </div>
 
             {vocabularyLoading && <p style={styles.statusText}>Đang tải danh sách từ vựng...</p>}
-            {!vocabularyLoading && selectedVocabularyLesson && (
+            {!vocabularyLoading && vocabularyForm.language_id && (
               <div style={{ marginTop: '20px' }}>
-                <h4 style={styles.subTitle}>Danh sách từ vựng - {lessonLabel(selectedVocabularyLesson)}</h4>
+                <h4 style={styles.subTitle}>Danh sách từ vựng - {languages.find((l) => String(l.id) === String(vocabularyForm.language_id))?.name || ''}</h4>
                 <div style={styles.tableWrapper}>
                   <table style={styles.table}>
                     <thead>
@@ -1021,17 +1221,98 @@ function TeacherCreateContent() {
                           <td style={styles.td}>
                             <div style={styles.actionGroup}>
                               <button type="button" onClick={() => handleEditVocabulary(item)} style={styles.secondaryBtn}>Sửa</button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteVocabulary(item)}
+                                disabled={vocabBusyId === item.id}
+                                style={{ ...styles.secondaryBtn, borderColor: '#fecaca', background: '#fef2f2', color: '#b91c1c' }}
+                              >
+                                {vocabBusyId === item.id ? '...' : 'Xóa'}
+                              </button>
                             </div>
                           </td>
                         </tr>
                       ))}
                       {vocabularies.length === 0 && (
                         <tr>
-                          <td colSpan={7} style={styles.emptyCell}>Chưa có từ vựng trong lesson này.</td>
+                          <td colSpan={7} style={styles.emptyCell}>Chưa có từ vựng cho ngôn ngữ này.</td>
                         </tr>
                       )}
                     </tbody>
                   </table>
+                </div>
+
+                {/* THÙNG RÁC — xóa mềm giữ bản ghi lại, nên phải có chỗ xem và
+                  * khôi phục. Không có khối này thì từ đã xóa biến mất khỏi
+                  * giao diện mà vẫn nằm trong CSDL, và còn chặn việc thêm lại
+                  * từ cùng tên vì ràng buộc duy nhất (language_id, word). */}
+                <div style={{ marginTop: '16px' }}>
+                  <button
+                    type="button"
+                    style={styles.secondaryBtn}
+                    onClick={() => {
+                      const next = !showDeletedVocab;
+                      setShowDeletedVocab(next);
+                      if (next) fetchDeletedVocabulary(vocabularyForm.language_id);
+                    }}
+                  >
+                    {showDeletedVocab ? 'Ẩn thùng rác' : `Thùng rác${deletedVocabularies.length ? ` (${deletedVocabularies.length})` : ''}`}
+                  </button>
+
+                  {showDeletedVocab && (
+                    <div style={{ marginTop: '10px' }}>
+                      <p style={styles.helperText}>
+                        Từ trong thùng rác không hiện cho người học. Khôi phục được
+                        bất cứ lúc nào. Xóa hẳn thì không lấy lại được.
+                      </p>
+                      <div style={styles.tableWrapper}>
+                        <table style={styles.table}>
+                          <thead>
+                            <tr style={styles.tableHeadRow}>
+                              <th style={styles.th}>Từ</th>
+                              <th style={styles.th}>Nghĩa</th>
+                              <th style={styles.th}>Ngôn ngữ</th>
+                              <th style={styles.th}>Thao tác</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {deletedVocabularies.map((item) => (
+                              <tr key={item.id} style={styles.tableRow}>
+                                <td style={styles.td}><strong>{item.word}</strong></td>
+                                <td style={styles.td}>{item.meaning}</td>
+                                <td style={styles.td}>{item.language?.name || item.language_id}</td>
+                                <td style={styles.td}>
+                                  <div style={styles.actionGroup}>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRestoreVocabulary(item)}
+                                      disabled={vocabBusyId === item.id}
+                                      style={{ ...styles.secondaryBtn, borderColor: '#bbf7d0', background: '#f0fdf4', color: '#15803d' }}
+                                    >
+                                      Khôi phục
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handlePurgeVocabulary(item)}
+                                      disabled={vocabBusyId === item.id}
+                                      style={{ ...styles.secondaryBtn, borderColor: '#fecaca', background: '#fef2f2', color: '#b91c1c' }}
+                                    >
+                                      Xóa hẳn
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                            {deletedVocabularies.length === 0 && (
+                              <tr>
+                                <td colSpan={4} style={styles.emptyCell}>Thùng rác trống.</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1040,7 +1321,7 @@ function TeacherCreateContent() {
 
         {mode === 'exercise' && (
           <div style={styles.card}>
-            <h3 style={styles.cardTitle}>Tạo Exercise (AI)</h3>
+            <h3 style={styles.cardTitle}>Tạo Exercise</h3>
             <p style={styles.hintText}>Giáo viên chọn kỹ năng. Hệ thống sẽ quét file, tách phần nội dung và tạo một bài riêng cho mỗi phần đã chọn.</p>
             {generateLoading && (
               <div style={styles.loadingBanner}>
@@ -1048,7 +1329,9 @@ function TeacherCreateContent() {
                 Đang tạo bài, vui lòng chờ...
               </div>
             )}
-            <form onSubmit={submitExercise} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '12px', alignItems: 'end' }}>
+            {/* Hai cột BẰNG NHAU (minmax 0): cột `auto` cũ giãn theo nội dung rộng nhất (khung quét PDF)
+              * và ép các ô còn lại thành một dải hẹp. Khối file nghe / file đề chiếm cả hàng. */}
+            <form onSubmit={submitExercise} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', alignItems: 'end' }}>
               <div>
                 <label style={styles.label}>Kỹ năng</label>
                 <select
@@ -1110,8 +1393,9 @@ function TeacherCreateContent() {
                   required
                 />
               </div>
-            {exerciseForm.skill === 'listening' && (
-              <div style={{ marginTop: '12px' }}>
+            {/* Đề nghe dạng PDF quét: QUÉT ĐỀ TRƯỚC, gán file nghe ở bước duyệt (một file hoặc mỗi phần một file). */}
+            {exerciseForm.skill === 'listening' && !isPdfScanFlow(exerciseFile) && (
+              <div style={{ marginTop: '12px', gridColumn: '1 / -1' }}>
                 <label style={styles.label}>File nghe (mp3, wav, m4a, webm, ogg)</label>
                 <input
                   type="file"
@@ -1122,11 +1406,13 @@ function TeacherCreateContent() {
                 {listeningAudioFile && (
                   <div style={styles.helperText}>Đã chọn: {listeningAudioFile.name}</div>
                 )}
-                {!listeningAudioFile && <div style={styles.helperText}>Bạn cần tải file audio để AI tạo bài nghe.</div>}
+                {!listeningAudioFile && <div style={styles.helperText}>Bài nghe cần file âm thanh (chọn trước khi lưu bài).</div>}
               </div>
             )}
 
-            <div style={{ marginTop: '12px' }}>
+            {/* Quét file đề: CHỈ cho Nghe / Đọc / Viết / Ngữ pháp / Từ vựng.
+              * Kỹ năng NÓI không có đề để quét — xem ghi chú ở SPEAKING_SKILL. */}
+            <div style={{ marginTop: '12px', gridColumn: '1 / -1', display: exerciseForm.skill === SPEAKING_SKILL ? 'none' : 'block' }}>
               <label style={styles.label}>Tải file đề (PDF/DOCX) để quét nội dung</label>
               <input
                 type="file"
@@ -1134,16 +1420,86 @@ function TeacherCreateContent() {
                 style={styles.input}
                 onChange={(e) => handleExerciseFileChange(e.target.files?.[0] || null)}
               />
+              {isPdfScanFlow(exerciseFile) && (
+                <div style={{ marginTop: '10px', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                  <div style={styles.helperText}>
+                    Đề PDF được quét bằng OCR ngay trên máy chủ (đọc được cả bản scan), đề 14 trang mất khoảng 2 phút. Chỗ máy đọc không chắc sẽ hiện bằng ảnh gốc của đề.
+                    {exerciseForm.skill === 'listening' && ' Bài nghe: quét đề trước, sau đó gán file nghe ở bước duyệt (một file cho cả đề hoặc mỗi phần một file).'}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginTop: '8px', alignItems: 'end' }}>
+                    <div>
+                      <label style={styles.label}>Trang đề cần quét</label>
+                      <input style={styles.input} value={scanPages} onChange={(e) => setScanPages(e.target.value)} placeholder="vd: 3-16 (để trống = mọi trang)" />
+                    </div>
+                    <div>
+                      <label style={styles.label}>File đáp án riêng (PDF, nếu đáp án không nằm trong file đề)</label>
+                      <input type="file" accept=".pdf,application/pdf" style={styles.input} onChange={(e) => setScanKeyFile(e.target.files?.[0] || null)} />
+                    </div>
+                    <div>
+                      <label style={styles.label}>Trang có bảng đáp án (không bắt buộc)</label>
+                      <input style={styles.input} value={scanKeyPages} onChange={(e) => setScanKeyPages(e.target.value)} placeholder={scanKeyFile ? 'để trống = mọi trang của file đáp án' : 'để trống = tự tìm ở cuối file đề'} />
+                    </div>
+                  </div>
+                  <div style={styles.helperText}>
+                    Đáp án lấy theo thứ tự: file đáp án riêng (nếu có tải lên) → bảng đáp án ở cuối file đề (tự tìm, trang đáp án không bị coi là trang đề).
+                    Không tìm thấy thì chọn đáp án ở bước duyệt. Bỏ trang bìa / trang trắng để không sinh câu rác.
+                    {exerciseForm.skill === 'listening' && !scanKeyFile && ' Bài nghe nên có file đáp án: phần chỉ nghe không in câu nào (vd もんだい4) chỉ biết số câu nhờ bảng đáp án. Quên thì vẫn gắn được ở bước duyệt, không phải quét lại.'}
+                  </div>
+                </div>
+              )}
               <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
-                <button type="button" onClick={previewExerciseFile} style={styles.submitBtn} disabled={exercisePreviewLoading || !exerciseFile}>
-                  {exercisePreviewLoading ? 'Đang quét...' : 'Quét nội dung'}
+                <button type="button" onClick={previewExerciseFile} style={styles.submitBtn} disabled={exercisePreviewLoading || !exerciseFile || scanActive}>
+                  {exercisePreviewLoading || scanActive ? 'Đang quét...' : 'Quét nội dung'}
                 </button>
-                <button type="button" onClick={() => { setExerciseFile(null); setExerciseParts([]); setExerciseSelectedParts([]); }} style={styles.cancelBtn}>
+                <button type="button" onClick={() => { handleExerciseFileChange(null); setScanKeyFile(null); }} style={styles.cancelBtn}>
                   Xóa
                 </button>
               </div>
 
-              {exerciseParts.length > 0 && (
+              {scanActive && (
+                <div style={{ marginTop: '10px', padding: '12px', borderRadius: '10px', border: '1px solid #bae6fd', background: '#f0f9ff' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '13px', color: '#0c4a6e' }}>
+                    <span>
+                      {scanJob.status === 'queued'
+                        ? `Đang chờ lượt quét${scanJob.queuePosition ? ` (còn ${scanJob.queuePosition} đề trước)` : ''}…`
+                        : `Đang ${scanJob.progress?.step || 'quét'}…`}
+                    </span>
+                    <span>{scanJob.progress?.total ? `${scanJob.progress.done}/${scanJob.progress.total}` : ''}</span>
+                  </div>
+                  <div style={{ height: '8px', borderRadius: '999px', background: '#e0f2fe', marginTop: '6px', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', background: '#0284c7', width: `${scanJob.progress?.total ? Math.round(100 * scanJob.progress.done / scanJob.progress.total) : 3}%`, transition: 'width .4s' }} />
+                  </div>
+                  <button type="button" onClick={cancelPdfScan} style={{ ...styles.cancelBtn, marginTop: '8px' }}>Huỷ quét</button>
+                </div>
+              )}
+
+              {scanExam && (
+                <ScanExamReview
+                  data={scanExam}
+                  onChange={setScanExam}
+                  onSave={saveScanExam}
+                  onCancel={cancelPdfScan}
+                  onAttachKey={attachScanKey}
+                  saveError={scanSaveError}
+
+                  saving={scanSaving}
+                  needAudio={exerciseForm.skill === 'listening'}
+                />
+              )}
+
+              {docxExam && (
+                <DocxExamReview
+                  data={docxExam}
+                  onChange={setDocxExam}
+                  onSave={saveDocxExam}
+                  onCancel={() => setDocxExam(null)}
+                  saving={docxSaving}
+                  needAudio={exerciseForm.skill === 'listening'}
+                  audioFile={listeningAudioFile}
+                />
+              )}
+
+              {!docxExam && exerciseParts.length > 0 && (
                 <div style={{ marginTop: '12px' }}>
                   <h4 style={styles.subTitle}>Chọn phần nội dung để dùng</h4>
                   <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
@@ -1200,6 +1556,124 @@ function TeacherCreateContent() {
             </div>
 
             </form>
+
+            {/* ============ KỸ NĂNG NÓI — đường riêng ============
+              * Model chấm phát âm so bản ghi với VĂN BẢN ĐÍCH biết trước, nên
+              * không quét file đề. Giáo viên nhập thẳng từng dòng.
+              * Lưu vào `speaking_passages`, KHÔNG vào `exercises`. */}
+            {exerciseForm.skill === SPEAKING_SKILL && (
+              <form onSubmit={submitSpeakingPassage} style={{ marginTop: '16px', paddingTop: '16px', borderTop: '2px solid #e2e8f0' }}>
+                <h4 style={styles.subTitle}>Bài đọc cho kỹ năng Nói</h4>
+                <p style={styles.hintText}>
+                  Kỹ năng Nói không quét file đề. Model chấm phát âm cần biết
+                  trước người học phải đọc câu gì, nên bạn nhập thẳng nội dung.
+                  <strong> Mỗi dòng là một lần đọc và được chấm riêng.</strong>
+                </p>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div>
+                    <label style={styles.label}>Dạng bài</label>
+                    <select
+                      style={styles.input}
+                      value={speakingForm.kind}
+                      onChange={(e) => setSpeakingForm((p) => ({ ...p, kind: e.target.value }))}
+                    >
+                      <option value="passage">Đoạn văn (đọc liền mạch)</option>
+                      <option value="dialogue">Hội thoại (nhiều vai)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={styles.label}>Tên bài</label>
+                    <input
+                      style={styles.input}
+                      value={speakingForm.title}
+                      onChange={(e) => setSpeakingForm((p) => ({ ...p, title: e.target.value }))}
+                      placeholder="Ví dụ: Hội thoại ở cửa hàng"
+                    />
+                  </div>
+                  <div>
+                    <label style={styles.label}>Chủ đề (tuỳ chọn)</label>
+                    <input
+                      style={styles.input}
+                      value={speakingForm.topic}
+                      onChange={(e) => setSpeakingForm((p) => ({ ...p, topic: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label style={styles.label}>Trình độ (tuỳ chọn)</label>
+                    <input
+                      style={styles.input}
+                      value={speakingForm.level}
+                      onChange={(e) => setSpeakingForm((p) => ({ ...p, level: e.target.value }))}
+                      placeholder={isJapaneseExercise ? 'N5, N4...' : 'A2, B1...'}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginTop: '12px' }}>
+                  <label style={styles.label}>
+                    Nội dung — mỗi dòng một câu
+                    {speakingForm.kind === 'dialogue' && ' (viết "Vai: nội dung")'}
+                  </label>
+                  <textarea
+                    style={{ ...styles.input, minHeight: '160px', fontFamily: 'inherit' }}
+                    value={speakingForm.content}
+                    onChange={(e) => setSpeakingForm((p) => ({ ...p, content: e.target.value }))}
+                    placeholder={speakingForm.kind === 'dialogue'
+                      ? 'A: すみません、えきはどこですか\nB: あそこです'
+                      : (isJapaneseExercise
+                        ? 'あかいいすでたべる\nくらいえきでたべる'
+                        : 'The weather is nice today.\nI walk to school every morning.')}
+                  />
+                  <div style={styles.helperText}>
+                    {isJapaneseExercise
+                      ? 'Tiếng Nhật: chỉ những câu có mốc người bản ngữ mới chấm được tiêu chí Ngữ điệu. Server tự kiểm và báo lại sau khi lưu — bạn không cần tự đánh dấu.'
+                      : 'Tiếng Anh: nên giữ 4–10 từ mỗi câu. Model train trên câu dài tối đa 10 từ; câu dài hơn là dùng model ngoài miền và điểm mất ý nghĩa.'}
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                  <div>
+                    <label style={styles.label}>Nguồn</label>
+                    <input
+                      style={styles.input}
+                      value={speakingForm.source}
+                      onChange={(e) => setSpeakingForm((p) => ({ ...p, source: e.target.value }))}
+                      placeholder="Ví dụ: Tatoeba, hoặc tự soạn"
+                    />
+                  </div>
+                  <div>
+                    <label style={styles.label}>Giấy phép</label>
+                    <input
+                      style={styles.input}
+                      value={speakingForm.license}
+                      onChange={(e) => setSpeakingForm((p) => ({ ...p, license: e.target.value }))}
+                      placeholder="Ví dụ: CC BY 2.0 FR"
+                    />
+                  </div>
+                </div>
+                <div style={{ ...styles.helperText, marginTop: '6px' }}>
+                  ⚠️ Không nạp nội dung có bản quyền (Minna no Nihongo và các
+                  giáo trình khác). Nguồn mở dùng được: Tatoeba (CC BY), hoặc
+                  tự soạn.
+                </div>
+
+                {speakingMsg && (
+                  <div style={{
+                    marginTop: '12px', padding: '10px 12px', borderRadius: '8px',
+                    background: speakingMsg.type === 'error' ? '#fef2f2' : '#f0fdf4',
+                    color: speakingMsg.type === 'error' ? '#b91c1c' : '#15803d',
+                    border: `1px solid ${speakingMsg.type === 'error' ? '#fecaca' : '#bbf7d0'}`
+                  }}>
+                    {speakingMsg.text}
+                  </div>
+                )}
+
+                <button type="submit" style={{ ...styles.submitBtn, marginTop: '12px' }} disabled={speakingSaving}>
+                  {speakingSaving ? 'Đang lưu...' : 'Lưu bài đọc'}
+                </button>
+              </form>
+            )}
 
             {/* Modal - Xem chi tiết PART */}
             {selectedPartForDetail !== null && exerciseParts[selectedPartForDetail] && (
@@ -1420,28 +1894,28 @@ function TeacherCreateContent() {
 const styles = {
   wrapper: {
     minHeight: '100vh',
-    background: 'radial-gradient(circle at top left, rgba(31, 122, 140, 0.14), transparent 28%), linear-gradient(180deg, #eef4fb 0%, #f7f9fc 38%, #edf2f8 100%)',
+    background: '#f8fafc',
     color: '#0f172a',
     fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif'
   },
   header: {
-    background: 'rgba(8, 47, 73, 0.92)',
+    background: '#ffffff',
     backdropFilter: 'blur(14px)',
     borderBottom: '1px solid rgba(148, 163, 184, 0.18)',
     padding: '16px 32px',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    color: '#fff',
+    color: '#0f172a',
     position: 'sticky',
     top: 0,
     zIndex: 20
   },
   headerLeft: { display: 'flex', alignItems: 'center', gap: '16px' },
   backBtn: {
-    background: 'rgba(255,255,255,0.12)',
-    color: '#fff',
-    border: '1px solid rgba(255,255,255,0.2)',
+    background: '#f1f5f9',
+    color: '#334155',
+    border: '1px solid #e2e8f0',
     padding: '9px 16px',
     borderRadius: '999px',
     cursor: 'pointer',
@@ -1450,7 +1924,7 @@ const styles = {
   },
   logo: { fontSize: '18px', fontWeight: '800', letterSpacing: '-0.02em' },
   headerSubtitle: { fontSize: '12px', color: 'rgba(226, 232, 240, 0.82)', marginTop: '2px' },
-  welcomeText: { fontSize: '14px', color: 'rgba(226, 232, 240, 0.9)' },
+  welcomeText: { fontSize: '14px', color: '#475569' },
   content: { maxWidth: '1360px', margin: '0 auto', padding: '28px 24px 40px' },
   hero: {
     display: 'flex',
@@ -1487,12 +1961,11 @@ const styles = {
   statLabel: { fontSize: '12px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.12em' },
   statValue: { fontSize: '28px', color: '#0f172a', marginTop: '10px', letterSpacing: '-0.03em' },
   mainPanel: {
-    background: 'rgba(255,255,255,0.82)',
-    border: '1px solid rgba(148, 163, 184, 0.2)',
-    borderRadius: '28px',
+    background: '#ffffff',
+    border: '1px solid #f1f5f9',
+    borderRadius: '16px',
     padding: '20px',
-    boxShadow: '0 22px 44px rgba(15, 23, 42, 0.08)',
-    backdropFilter: 'blur(10px)'
+    boxShadow: '0 1px 2px rgba(15, 23, 42, 0.05)'
   },
   panelHeader: { display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'start', marginBottom: '18px', flexWrap: 'wrap' },
   panelEyebrow: { textTransform: 'uppercase', letterSpacing: '0.18em', color: '#64748b', fontSize: '11px', fontWeight: '800' },
@@ -1537,7 +2010,7 @@ const styles = {
     fontSize: '14px'
   },
   modeBtnActive: {
-    background: 'linear-gradient(135deg, #1f7a8c 0%, #2c5f8a 100%)',
+    background: '#2563eb',
     color: '#fff',
     border: '1px solid rgba(37, 99, 235, 0.12)',
     padding: '10px 16px',
@@ -1548,10 +2021,10 @@ const styles = {
   },
   card: {
     background: '#fff',
-    borderRadius: '22px',
+    borderRadius: '16px',
     padding: '22px',
-    boxShadow: '0 14px 36px rgba(15,23,42,0.06)',
-    border: '1px solid #e6edf5'
+    boxShadow: '0 1px 2px rgba(15,23,42,0.05)',
+    border: '1px solid #f1f5f9'
   },
   cardTitle: { marginTop: 0, marginBottom: '14px', color: '#0f172a', fontSize: '20px', letterSpacing: '-0.02em' },
   hintText: { marginTop: 0, marginBottom: '14px', color: '#52606d', fontSize: '14px', lineHeight: 1.6 },
@@ -1586,7 +2059,7 @@ const styles = {
     color: '#0f172a'
   },
   submitBtn: {
-    background: 'linear-gradient(135deg, #1f7a8c 0%, #2c5f8a 100%)',
+    background: '#2563eb',
     color: '#fff',
     border: 'none',
     padding: '11px 16px',
@@ -1674,7 +2147,7 @@ const styles = {
     background: '#fff'
   },
   table: { width: '100%', borderCollapse: 'collapse' },
-  tableHeadRow: { background: 'linear-gradient(135deg, #1f7a8c 0%, #2c5f8a 100%)', color: '#fff' },
+  tableHeadRow: { background: '#2563eb', color: '#fff' },
   th: { textAlign: 'left', padding: '12px 14px', fontSize: '14px', whiteSpace: 'nowrap' },
   td: { padding: '12px 14px', borderTop: '1px solid #edf2f7', verticalAlign: 'top', fontSize: '14px', color: '#334155' },
   tableRow: { background: '#fff' },

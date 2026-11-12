@@ -1,28 +1,40 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { Mail, User, Loader2 } from 'lucide-react';
 import api from '../services/api';
+import {
+  AuthLayout, ErrorBox, PasswordInput, GoogleButton, GoogleSignupStep, useGoogleAuth, storeSession, inputCls, primaryBtnCls
+} from '../components/auth/AuthShell';
+import { passwordProblem, usernameProblem, isEmail, PASSWORD_RULE_TEXT } from '../../utils/validation.js';
 
+/*
+ * Đăng ký — cùng giao diện với trang Đăng nhập.
+ *   "Đăng ký bằng Google" (nhanh, đặt ở trên): lấy email + tên từ tài khoản Google, người dùng sửa tên nếu muốn
+ *     và đặt mật khẩu riêng cho Lingua -> tạo tài khoản học viên và đăng nhập luôn.
+ *     Email Google đã có tài khoản thì đăng nhập thẳng vào tài khoản đó.
+ *   Đăng ký thủ công (như cũ): tên + email + mật khẩu -> chuyển sang trang Đăng nhập.
+ */
 function RegisterPage() {
   const navigate = useNavigate();
   const [form, setForm] = useState({ username: '', email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPw, setShowPw] = useState(false);
 
-  const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
-  };
+  const g = useGoogleAuth({ onSignedIn: (data) => { storeSession(data); navigate('/'); }, setError });
+
+  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-
+    const problem = usernameProblem(form.username)
+      || (isEmail(form.email.trim()) ? null : 'Email không hợp lệ')
+      || passwordProblem(form.password, { email: form.email, username: form.username });
+    if (problem) { setError(problem); return; }
     setLoading(true);
     try {
-      await api.post('/auth/register', {
-        username: form.username,
-        email: form.email,
-        password: form.password
-      });
+      await api.post('/auth/register', { username: form.username.trim(), email: form.email.trim(), password: form.password });
       navigate('/login');
     } catch (err) {
       setError(err.response?.data?.message || 'Đăng ký thất bại');
@@ -32,144 +44,69 @@ function RegisterPage() {
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <h2 style={styles.title}>🌏 Đăng ký</h2>
-        <p style={styles.subtitle}>Tạo tài khoản để bắt đầu học!</p>
+    <AuthLayout>
+      {g.signup ? (
+        <GoogleSignupStep g={g} error={error} backLabel="Quay lại đăng ký" onBack={() => { g.setSignup(null); setError(''); }} />
+      ) : (
+        <>
+          <h1 className="text-2xl font-bold text-slate-900">Tạo tài khoản</h1>
+          <p className="mt-1 text-sm text-slate-500">Tạo tài khoản để bắt đầu học!</p>
 
-        {error && <div style={styles.error}>{error}</div>}
+          <ErrorBox error={error} />
 
-        <form onSubmit={handleSubmit}>
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Tên người dùng</label>
-            <input
-              type="text"
-              name="username"
-              value={form.username}
-              onChange={handleChange}
-              placeholder="Nhập tên người dùng"
-              style={styles.input}
-              required
-            />
-          </div>
+          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+            <div>
+              <label htmlFor="reg-name" className="mb-1.5 block text-sm font-semibold text-slate-700">Tên người dùng</label>
+              <div className="relative">
+                <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  id="reg-name" type="text" name="username" autoComplete="nickname" maxLength={50}
+                  value={form.username} onChange={handleChange}
+                  placeholder="Nhập tên người dùng" className={inputCls} required
+                />
+              </div>
+            </div>
 
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Email</label>
-            <input
-              type="email"
-              name="email"
-              value={form.email}
-              onChange={handleChange}
-              placeholder="Nhập email của bạn"
-              style={styles.input}
-              required
-            />
-          </div>
+            <div>
+              <label htmlFor="reg-email" className="mb-1.5 block text-sm font-semibold text-slate-700">Email</label>
+              <div className="relative">
+                <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  id="reg-email" type="email" name="email" autoComplete="email"
+                  value={form.email} onChange={handleChange}
+                  placeholder="Nhập email của bạn" className={inputCls} required
+                />
+              </div>
+            </div>
 
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Mật khẩu</label>
-            <input
-              type="password"
-              name="password"
-              value={form.password}
-              onChange={handleChange}
-              placeholder="Nhập mật khẩu"
-              style={styles.input}
-              required
-            />
-          </div>
+            <div>
+              <label htmlFor="reg-password" className="mb-1.5 block text-sm font-semibold text-slate-700">Mật khẩu</label>
+              <PasswordInput
+                id="reg-password" name="password" placeholder="Nhập mật khẩu"
+                value={form.password} onChange={handleChange} show={showPw} onToggle={() => setShowPw((v) => !v)}
+              />
+              <p className="mt-1 text-xs text-slate-400">{PASSWORD_RULE_TEXT}</p>
+            </div>
 
-          <button type="submit" style={styles.button} disabled={loading}>
-            {loading ? 'Đang đăng ký...' : 'Đăng ký'}
-          </button>
-        </form>
+            <button type="submit" disabled={loading} className={primaryBtnCls}>
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+              {loading ? 'Đang đăng ký...' : 'Đăng ký'}
+            </button>
+          </form>
 
-        <p style={styles.link}>
-          Đã có tài khoản?{' '}
-          <Link to="/login" style={styles.linkText}>Đăng nhập</Link>
-        </p>
-      </div>
-    </div>
+          <GoogleButton onCredential={g.handleCredential} onError={setError} />
+          {g.busy && (
+            <p className="mt-3 flex items-center justify-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Đang lấy thông tin tài khoản Google…</p>
+          )}
+
+          <p className="mt-8 text-center text-sm text-slate-500">
+            Đã có tài khoản?{' '}
+            <Link to="/login" className="font-semibold text-blue-600 hover:text-blue-700">Đăng nhập</Link>
+          </p>
+        </>
+      )}
+    </AuthLayout>
   );
 }
-
-const styles = {
-  container: {
-    minHeight: '100vh',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    fontFamily: 'sans-serif'
-  },
-  card: {
-    background: '#fff',
-    padding: '40px',
-    borderRadius: '12px',
-    boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
-    width: '100%',
-    maxWidth: '400px'
-  },
-  title: {
-    textAlign: 'center',
-    marginBottom: '8px',
-    color: '#333',
-    fontSize: '24px'
-  },
-  subtitle: {
-    textAlign: 'center',
-    color: '#888',
-    marginBottom: '24px'
-  },
-  error: {
-    background: '#fff0f0',
-    color: '#e53e3e',
-    padding: '10px 14px',
-    borderRadius: '6px',
-    marginBottom: '16px',
-    border: '1px solid #fed7d7',
-    fontSize: '14px'
-  },
-  formGroup: { marginBottom: '16px' },
-  label: {
-    display: 'block',
-    marginBottom: '6px',
-    fontWeight: '600',
-    color: '#555',
-    fontSize: '14px'
-  },
-  input: {
-    width: '100%',
-    padding: '10px 14px',
-    border: '1px solid #ddd',
-    borderRadius: '6px',
-    fontSize: '14px',
-    outline: 'none',
-    boxSizing: 'border-box'
-  },
-  button: {
-    width: '100%',
-    padding: '12px',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '6px',
-    fontSize: '15px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    marginTop: '8px'
-  },
-  link: {
-    textAlign: 'center',
-    marginTop: '20px',
-    color: '#888',
-    fontSize: '14px'
-  },
-  linkText: {
-    color: '#667eea',
-    fontWeight: '600',
-    textDecoration: 'none'
-  }
-};
 
 export default RegisterPage;

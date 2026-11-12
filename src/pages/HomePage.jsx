@@ -1,348 +1,151 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  BookOpen,
-  Headphones,
-  PenTool,
-  Search,
-  Sparkles,
-  ShieldCheck,
-  LogOut,
-  Users,
-  LibraryBig,
-  Palette,
-  Clock,
-  ChevronRight,
-  Mic2
-} from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
+import DashboardLayout from '../components/dashboard/DashboardLayout';
 
-const skillMeta = {
-  reading: { label: 'Reading', icon: BookOpen, image: 'public/images/reading-illustration.png', badge: 'bg-primary/10 text-primary' },
-  listening: { label: 'Listening', icon: Headphones, image: 'public/images/listening-illustration.png', badge: 'bg-accent/10 text-accent' },
-  writing: { label: 'Writing', icon: PenTool, image: 'public/images/writing-illustration.png', badge: 'bg-warning/10 text-warning' },
-  speaking: { label: 'Speaking', icon: Mic2, image: 'public/images/speaking-illustration.png', badge: 'bg-success/10 text-success' },
-  vocabulary: { label: 'Vocabulary', icon: BookOpen, image: 'public/images/reading-illustration.png', badge: 'bg-primary/10 text-primary' },
-  grammar: { label: 'Grammar', icon: LibraryBig, image: 'public/images/reading-illustration.png', badge: 'bg-accent/10 text-accent' }
+/**
+ * Trang của người học.
+ *
+ * BA KHÁC BIỆT SO VỚI BẢN MẪU, đều do yêu cầu bỏ Dashboard / Course:
+ *
+ * 1. KHÔNG có trạng thái "chưa chọn kỹ năng". Bản mẫu để `selectedSkill = ''`
+ *    nghĩa là đang ở trang tổng quan. Ở đây đăng nhập xong vào thẳng Từ vựng,
+ *    và bấm lại một kỹ năng đang chọn thì KHÔNG bỏ chọn (nếu bỏ thì màn hình
+ *    trống, vì không còn trang tổng quan để rơi về).
+ *
+ * 2. Ngôn ngữ dùng mã 'en'/'ja' — khớp cột `code` của bảng `languages` và
+ *    khớp trường `language` mà API bài tập trả về. Bản mẫu dùng 'english' rồi
+ *    so khớp bằng chữ cái đầu, dễ sai khi thêm ngôn ngữ mới.
+ *
+ * 3. Đổi ngôn ngữ thì GIỮ kỹ năng đang xem nếu ngôn ngữ mới cũng có kỹ năng
+ *    đó, ngược lại rơi về Từ vựng. Lý do: tiếng Anh có `writing`, tiếng Nhật
+ *    có `grammar` — chuyển qua lại mà giữ cứng sẽ ra danh sách rỗng khó hiểu.
+ */
+const DEFAULT_SKILL = 'vocabulary';
+
+// Phải khớp Sidebar. Để ở đây để HomePage tự kiểm được kỹ năng có hợp lệ với
+// ngôn ngữ đang chọn hay không, không phải đoán.
+const SKILLS_BY_LANG = {
+  en: ['vocabulary', 'flashcards', 'listening', 'speaking', 'reading', 'writing'],
+  ja: ['vocabulary', 'flashcards', 'listening', 'speaking', 'grammar', 'reading']
 };
 
-const partCountBySkill = { reading: 4, listening: 3, speaking: 2, writing: 2, vocabulary: 5, grammar: 5 };
-const japanesePartOptions = [
-  { value: 1, label: 'N5' },
-  { value: 2, label: 'N4' },
-  { value: 3, label: 'N3' },
-  { value: 4, label: 'N2' },
-  { value: 5, label: 'N1' }
-];
+/**
+ * NGÔN NGỮ + KỸ NĂNG ĐANG XEM phải sống sót khi rời trang chủ rồi quay lại.
+ * Trước đây chúng chỉ là state của React nên mở một bài rồi bấm "Quay lại"
+ * luôn rơi về Tiếng Anh / Từ vựng. Giờ lưu ở hai chỗ:
+ *   - URL (`/?lang=ja&skill=reading`) — nút Quay lại (`navigate(-1)`) và nút
+ *     Back của trình duyệt trả về đúng mục cũ;
+ *   - sessionStorage — các trang đi về bằng `navigate('/')` (trang luyện nói,
+ *     trang quản trị) cũng về đúng mục cũ.
+ */
+const VIEW_KEY = 'home:view';
 
-const getExercisePart = (exercise) => {
-  const base = Number(exercise?.id) || 1;
-  const isJapanese = String(exercise?.language || exercise?.lang || exercise?.language_code || '').toLowerCase() === 'ja';
-  const partCount = isJapanese ? 5 : (partCountBySkill[exercise?.skill_type] || 3);
-  const mod = base % partCount;
-  return mod === 0 ? partCount : mod;
-};
+function readSavedView() {
+  try { return JSON.parse(sessionStorage.getItem(VIEW_KEY) || '{}'); } catch { return {}; }
+}
+
+function resolveInitialView(searchParams) {
+  const saved = readSavedView();
+  const lang = [searchParams.get('lang'), saved.lang].find((l) => SKILLS_BY_LANG[l]) || 'en';
+  const allowed = SKILLS_BY_LANG[lang];
+  const skill = [searchParams.get('skill'), saved.skill].find((s) => allowed.includes(s)) || DEFAULT_SKILL;
+  return { lang, skill };
+}
 
 function HomePage() {
   const navigate = useNavigate();
-  const [headerNav, setHeaderNav] = useState('dashboard');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [initialView] = useState(() => resolveInitialView(searchParams));
   const [exercises, setExercises] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSkill, setSelectedSkill] = useState('');
-  const [selectedParts, setSelectedParts] = useState([]);
-  const [selectedLanguage, setSelectedLanguage] = useState('all');
+  const [selectedSkill, setSelectedSkill] = useState(initialView.skill);
+  const [selectedLanguage, setSelectedLanguage] = useState(initialView.lang);
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+
+  // `replace` để đổi mục không tạo thêm bước lịch sử — bấm Back của trình
+  // duyệt vẫn ra khỏi trang chủ chứ không lùi qua từng kỹ năng đã bấm.
+  useEffect(() => {
+    sessionStorage.setItem(VIEW_KEY, JSON.stringify({ lang: selectedLanguage, skill: selectedSkill }));
+    setSearchParams({ lang: selectedLanguage, skill: selectedSkill }, { replace: true });
+  }, [selectedLanguage, selectedSkill, setSearchParams]);
 
   useEffect(() => {
     api.get('/exercises')
-      .then((exerciseRes) => {
-        setExercises(exerciseRes.data || []);
+      .then((res) => {
+        setExercises(res.data || []);
         setLoading(false);
       })
-      .catch((err) => {
+      .catch(() => {
         setError('Không thể tải danh sách bài tập');
         setLoading(false);
-        console.error(err);
       });
   }, []);
-
-  const partOptions = useMemo(() => {
-    if (selectedLanguage === 'japanese') return japanesePartOptions;
-    const fallbackCount = Math.max(...Object.values(partCountBySkill));
-    const partCount = selectedSkill ? (partCountBySkill[selectedSkill] || 0) : fallbackCount;
-    return Array.from({ length: partCount }, (_, index) => ({ value: index + 1, label: `Part ${index + 1}` }));
-  }, [selectedSkill, selectedLanguage]);
-
-  const getPartLabel = (part) => {
-    if (selectedLanguage === 'japanese') {
-      return japanesePartOptions.find((item) => item.value === Number(part))?.label || `N${part}`;
-    }
-    return `Part ${part}`;
-  };
-
-  useEffect(() => {
-    if (selectedLanguage === 'japanese') {
-      setSelectedSkill((prev) => (['reading', 'listening', 'vocabulary', 'grammar'].includes(prev) ? prev : ''));
-    } else if (selectedLanguage === 'english') {
-      setSelectedSkill((prev) => (['reading', 'listening', 'writing', 'speaking'].includes(prev) ? prev : ''));
-    }
-
-    if (!selectedSkill) {
-      setSelectedParts([]);
-      return;
-    }
-
-    const partCount = selectedLanguage === 'japanese' ? 5 : (partCountBySkill[selectedSkill] || 0);
-    setSelectedParts((prev) => prev.filter((part) => part <= partCount));
-  }, [selectedSkill, selectedLanguage]);
 
   const filteredExercises = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     let items = exercises.slice();
 
-    // Language filtering: 'all' shows both English and Japanese
-    if (selectedLanguage && selectedLanguage !== 'all') {
-      const want = String(selectedLanguage || '').toLowerCase();
-      items = items.filter((exercise) => {
-        const lang = String(exercise.language || exercise.lang || exercise.language_code || '').toLowerCase();
-        if (!lang) return false;
-        // support values like 'english'/'en' and 'japanese'/'ja'
-        return lang.startsWith(want.charAt(0)) || lang.includes(want);
-      });
-    }
+    const want = String(selectedLanguage || '').toLowerCase();
+    items = items.filter((ex) => {
+      const lang = String(ex.language || ex.lang || ex.language_code || '').toLowerCase();
+      return lang === want;
+    });
 
     if (selectedSkill) {
-      items = items.filter((exercise) => exercise.skill_type === selectedSkill);
+      items = items.filter((ex) => ex.skill_type === selectedSkill);
     }
-
-    if (selectedParts.length > 0) {
-      items = items.filter((exercise) => selectedParts.includes(getExercisePart(exercise)));
-    }
-
     if (!query) return items;
 
-    return items.filter((exercise) => [exercise.title, exercise.skill_type]
+    return items.filter((ex) => [ex.title, ex.skill_type]
       .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(query)));
-  }, [exercises, searchQuery, selectedParts, selectedSkill, selectedLanguage]);
+      .some((v) => String(v).toLowerCase().includes(query)));
+  }, [exercises, searchQuery, selectedSkill, selectedLanguage]);
 
-  const handleSelectSkill = (skill) => {
-    setSelectedSkill(selectedSkill === skill ? '' : skill);
-  };
+  // Bấm lại kỹ năng đang chọn thì giữ nguyên — không có trang tổng quan để về.
+  const handleSelectSkill = (skill) => setSelectedSkill(skill || DEFAULT_SKILL);
 
-  const handleTogglePart = (part) => {
-    setSelectedParts((prev) => (prev.includes(part) ? prev.filter((item) => item !== part) : [...prev, part]));
-  };
-
-  const handleExerciseLanguageNav = (language) => {
-    setSelectedLanguage(language);
-    setSelectedSkill('');
-    setSelectedParts([]);
+  const handleLanguageChange = (lang) => {
+    setSelectedLanguage(lang);
+    const allowed = SKILLS_BY_LANG[lang] || SKILLS_BY_LANG.en;
+    if (!allowed.includes(selectedSkill)) setSelectedSkill(DEFAULT_SKILL);
   };
 
   const handleOpenExercise = (exercise) => {
     if (!exercise?.skill_type) return;
-    const courseId = Number(exercise?.course_id) || 1;
-    navigate(`/courses/${courseId}/skills/${exercise.skill_type}/exercises/${exercise.id}`);
+    // Đọc to theo văn bản cho sẵn đi sang trang chấm phát âm riêng.
+    if (exercise.speaking_mode === 'read_aloud') {
+      navigate(`/speaking/${exercise.id}`);
+      return;
+    }
+    navigate(`/exercises/${exercise.id}`);
   };
-
-  const getExerciseDescription = () => 'Bài tập luyện kỹ năng theo từng phần.';
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    sessionStorage.removeItem(VIEW_KEY);
+    sessionStorage.removeItem('flashcards:view');
     navigate('/login');
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-50 border-b border-border/80 bg-card/90 backdrop-blur-xl shadow-sticky">
-        <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-          <button onClick={() => navigate('/')} className="flex items-center gap-3 text-left">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl gradient-primary text-primary-foreground shadow-elegant">
-              <Sparkles className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="text-lg font-bold leading-none">AI Languages Learn</div>
-              <div className="text-xs text-muted-foreground">Practice tests & exercises</div>
-            </div>
-          </button>
-
-          <div className="hidden md:flex items-center justify-center">
-            <nav className="inline-flex items-center gap-3 rounded-full bg-background/60 p-1">
-              <button
-                onClick={() => { setHeaderNav('dashboard'); handleExerciseLanguageNav('all'); navigate('/'); }}
-                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${headerNav === 'dashboard' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
-              >
-                <LibraryBig className="h-4 w-4" />
-                Dashboard
-              </button>
-              <button
-                onClick={() => { setHeaderNav('english'); handleExerciseLanguageNav('english'); /* stay on dashboard and filter */ }}
-                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${headerNav === 'english' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
-              >
-                <BookOpen className="h-4 w-4" />
-                English
-              </button>
-              <button
-                onClick={() => { setHeaderNav('japanese'); handleExerciseLanguageNav('japanese'); /* stay on dashboard and filter */ }}
-                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-smooth ${headerNav === 'japanese' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
-              >
-                <BookOpen className="h-4 w-4" />
-                Japanese
-              </button>
-            </nav>
-          </div>
-
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="hidden items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5 text-sm text-muted-foreground md:flex">
-              <ShieldCheck className="h-4 w-4 text-success" />
-              Xin chào, <span className="font-semibold text-foreground">{user.username || 'người dùng'}</span>
-            </div>
-            {user.role === 'admin' && (
-              <button onClick={() => navigate('/admin/users')} className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-smooth hover:border-primary hover:text-primary">
-                <Users className="h-4 w-4" />
-                Tài khoản
-              </button>
-            )}
-            {user.role === 'admin' && (
-              <button onClick={() => navigate('/admin/content')} className="hidden items-center gap-2 rounded-full border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-smooth hover:border-primary hover:text-primary sm:inline-flex">
-                <LibraryBig className="h-4 w-4" />
-                Nội dung
-              </button>
-            )}
-            {user.role === 'teacher' && (
-              <button onClick={() => navigate('/teacher/create-content')} className="hidden items-center gap-2 rounded-full border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-smooth hover:border-primary hover:text-primary sm:inline-flex">
-                <Palette className="h-4 w-4" />
-                Tạo bài tập
-              </button>
-            )}
-            <button onClick={handleLogout} className="inline-flex items-center gap-2 rounded-full gradient-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-elegant transition-smooth hover:shadow-glow">
-              <LogOut className="h-4 w-4" />
-              Đăng xuất
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8">
-        <section className="flex flex-col gap-6 rounded-[32px] border border-border bg-card p-6 shadow-card sm:p-7 lg:flex-row">
-          <aside className="w-full max-w-xs rounded-[24px] border border-border bg-background p-5 shadow-card">
-            <div className="space-y-6">
-              <div>
-                <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Skill</h3>
-                <div className="space-y-1">
-                  {Object.keys(skillMeta).map((skillKey) => {
-                    const meta = skillMeta[skillKey];
-                    const Icon = meta.icon;
-                    const active = selectedSkill === skillKey;
-                    return (
-                      <button
-                        key={skillKey}
-                        onClick={() => handleSelectSkill(skillKey)}
-                        className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-smooth ${active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
-                      >
-                        <Icon className="h-4 w-4" />
-                        {meta.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Part</h3>
-                <div className="flex flex-wrap gap-2">
-                  {partOptions.map((part) => (
-                    <button
-                      key={part.value}
-                      onClick={() => handleTogglePart(part.value)}
-                      className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium transition-smooth ${selectedParts.includes(part.value) ? 'gradient-primary text-primary-foreground shadow-elegant' : 'border border-border bg-card text-muted-foreground hover:border-primary hover:text-primary'}`}
-                    >
-                      {part.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </aside>
-
-          <div className="flex-1">
-            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">Exercises</p>
-                <h2 className="mt-1 text-2xl font-bold">Practice Tests & Exercises</h2>
-              </div>
-              <div className="flex w-full max-w-md items-center gap-3 sm:w-auto">
-                <div className="relative flex-1 sm:w-72">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    type="text"
-                    placeholder="Search exercises..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="h-11 w-full rounded-full border border-border bg-background pl-10 pr-4 text-sm outline-none transition-smooth focus:border-primary focus:ring-2 focus:ring-primary/10"
-                  />
-                </div>
-                <div className="hidden rounded-full border border-border bg-secondary px-3 py-2 text-sm text-muted-foreground lg:block">
-                  {filteredExercises.length} exercises found
-                </div>
-              </div>
-            </div>
-
-            {loading && <p className="py-12 text-center text-sm text-muted-foreground">Đang tải...</p>}
-            {error && <p className="py-12 text-center text-sm text-destructive">{error}</p>}
-            {!loading && !error && filteredExercises.length === 0 && (
-              <p className="py-12 text-center text-sm text-muted-foreground">Chưa có bài tập nào phù hợp.</p>
-            )}
-
-            {!loading && !error && filteredExercises.length > 0 && (
-              <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                {filteredExercises.map((exercise) => {
-                  const meta = skillMeta[exercise.skill_type] || skillMeta.reading;
-                  const Icon = meta.icon;
-                  const part = getExercisePart(exercise);
-                  const duration = Math.max(1, Math.round((exercise.time_limit_sec || 600) / 60));
-                  return (
-                    <button
-                      key={exercise.id}
-                      onClick={() => handleOpenExercise(exercise)}
-                      className="group overflow-hidden rounded-[24px] border border-border bg-background text-left shadow-card transition-smooth hover:-translate-y-1 hover:shadow-card-hover"
-                    >
-                      <div className="relative h-36 overflow-hidden">
-                        <img src={meta.image} alt={exercise.title} className="h-full w-full object-cover transition-smooth group-hover:scale-105" loading="lazy" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-foreground/60 to-transparent" />
-                        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-end text-xs">
-                          <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary-foreground backdrop-blur-sm">{getPartLabel(part)}</span>
-                        </div>
-                      </div>
-                      <div className="p-5">
-                        <div className="mb-2.5 flex items-center gap-2">
-                          <span className={`flex h-6 w-6 items-center justify-center rounded-md ${meta.badge}`}>
-                            <Icon className="h-3.5 w-3.5" />
-                          </span>
-                          <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                            {meta.label}
-                          </span>
-                        </div>
-                        <h3 className="mb-1.5 text-sm font-semibold leading-snug text-foreground line-clamp-2 transition-smooth group-hover:text-primary">{exercise.title}</h3>
-                        <p className="mb-3 text-xs text-muted-foreground line-clamp-2">{getExerciseDescription(exercise)}</p>
-                        <div className="flex items-center justify-between border-t border-border pt-3 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{duration}m</span>
-                          <span className="inline-flex items-center gap-1 text-primary">Start <ChevronRight className="h-4 w-4" /></span>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </section>
-      </main>
-    </div>
+    <DashboardLayout
+      filteredExercises={filteredExercises}
+      loading={loading}
+      error={error}
+      searchQuery={searchQuery}
+      selectedSkill={selectedSkill}
+      selectedLanguage={selectedLanguage}
+      user={user}
+      onSelectSkill={handleSelectSkill}
+      onLanguageChange={handleLanguageChange}
+      onSearchChange={setSearchQuery}
+      onOpenExercise={handleOpenExercise}
+      onLogout={handleLogout}
+    />
   );
 }
 

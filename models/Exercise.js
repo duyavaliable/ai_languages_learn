@@ -13,6 +13,19 @@ const Exercise = sequelize.define('Exercise', {
   audio_url: { type: DataTypes.STRING(500), allowNull: true },
   questions_json: { type: DataTypes.TEXT('long'), allowNull: false },
   time_limit_sec: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 900 },
+  // 'read_aloud' = doc to van ban cho san (model cham phat am)
+  // 'free'/null   = de noi tu do VSTEP, khong co van ban dich
+  speaking_mode: { type: DataTypes.STRING(16), allowNull: true },
+
+  // Bat buoc cho bai lay tu nguon ngoai -- do an phai trich dan duoc.
+  source: { type: DataTypes.STRING(500), allowNull: true },
+  license: { type: DataTypes.STRING(200), allowNull: true },
+  attribution: { type: DataTypes.TEXT, allowNull: true },
+
+  // Chi true khi MOI dong deu co moc nguoi ban ngu -> cham duoc ca bon tieu
+  // chi. Phai khop `GET /ja/sentences`; dung tu bat bang tay.
+  has_prosody_ref: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+
   is_deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }
 }, {
   tableName: 'exercises',
