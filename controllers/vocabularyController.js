@@ -1,6 +1,5 @@
 import { Language, Vocabulary } from '../models/index.js';
 import { parseVocabularyUpload } from '../services/vocabularyImportService.js';
-import { validateVocabularyColumnsWithAI } from '../services/aiService.js';
 
 const normalizeVocabularyPayload = (payload = {}) => ({
 	word: String(payload.word || '').trim(),
@@ -9,12 +8,6 @@ const normalizeVocabularyPayload = (payload = {}) => ({
 	example_sentence: String(payload.example_sentence || '').trim(),
 	example_translation: String(payload.example_translation || '').trim()
 });
-
-const parseBoolean = (value) => {
-	if (typeof value === 'boolean') return value;
-	const text = String(value || '').trim().toLowerCase();
-	return text === '1' || text === 'true' || text === 'yes';
-};
 
 export const getVocabulary = async (req, res) => {
 	try {
@@ -153,34 +146,17 @@ export const previewVocabularyUpload = async (req, res) => {
 			return res.status(400).json({ message: 'File is required' });
 		}
 
-		const enableAiValidation = parseBoolean(req.body?.validateWithAI);
-
+		// Đọc bảng từ vựng bằng luật (vocabularyImportService), không gửi cho AI bên ngoài.
 		const parsed = await parseVocabularyUpload(req.file);
-		let validatedItems = parsed.items;
-		let aiWarnings = [];
-		let aiValidationApplied = false;
-
-		if (enableAiValidation && parsed.items.length > 0) {
-			try {
-				const aiResult = await validateVocabularyColumnsWithAI(parsed.items);
-				validatedItems = Array.isArray(aiResult?.items) ? aiResult.items : parsed.items;
-				aiWarnings = Array.isArray(aiResult?.warnings) ? aiResult.warnings : [];
-				aiValidationApplied = true;
-			} catch (aiError) {
-				aiWarnings.push(`AI validation skipped: ${aiError.message}`);
-			}
-		}
 
 		return res.json({
 			fileType: parsed.fileType,
 			source: parsed.source,
 			usedTable: parsed.usedTable,
 			totalRows: parsed.totalTableRows,
-			totalWords: validatedItems.length,
-			totalItems: validatedItems.length,
-			aiValidationApplied,
-			aiWarnings,
-			items: validatedItems,
+			totalWords: parsed.items.length,
+			totalItems: parsed.items.length,
+			items: parsed.items,
 			rawText: parsed.rawText
 		});
 	} catch (error) {

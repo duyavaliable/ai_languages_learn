@@ -93,7 +93,6 @@ function TeacherCreateContent({ embedded = false, onCreated } = {}) {
   const [vocabularyPreviewRows, setVocabularyPreviewRows] = useState([]);
   const [vocabularyPreviewRaw, setVocabularyPreviewRaw] = useState('');
   const [vocabularyParseMeta, setVocabularyParseMeta] = useState(null);
-  const [vocabularyUseAiValidation, setVocabularyUseAiValidation] = useState(false);
   const [vocabularyPreviewLoading, setVocabularyPreviewLoading] = useState(false);
   const [vocabularySaveLoading, setVocabularySaveLoading] = useState(false);
 
@@ -396,11 +395,11 @@ function TeacherCreateContent({ embedded = false, onCreated } = {}) {
         : [];
 
       if (selectedParts.length === 0) {
-        showMsg('error', 'AI tạo bài đã bị tắt. Vui lòng chọn PART hoặc tải lên file chứa PART để tạo bài.');
+        showMsg('error', 'Chưa có PART nào. Hãy tải file đề lên để quét rồi chọn PART cần tạo bài.');
         setGenerateLoading(false);
         return;
       } else {
-        // Create exercises directly from selected PARTs (no AI generation)
+        // Tạo bài trực tiếp từ các PART đã quét trong file (không dùng AI)
         const partsPayload = selectedParts.map((p) => ({ title: p.part.title || '', content: p.part.content || '' }));
         const formData = new FormData();
         formData.append('course_id', String(Number(exerciseForm.course_id)));
@@ -460,7 +459,7 @@ function TeacherCreateContent({ embedded = false, onCreated } = {}) {
       });
 
       if (err?.code === 'ECONNABORTED') {
-        showMsg('error', 'Tạo exercise thất bại do quá thời gian chờ (timeout). Kiểm tra terminal backend để xem AI có còn đang xử lý không.');
+        showMsg('error', 'Tạo bài thất bại do quá thời gian chờ. Kiểm tra terminal của server để xem lỗi.');
       } else {
         showMsg('error', 'Tạo exercise thất bại. Xem terminal để biết chi tiết lỗi.');
       }
@@ -468,8 +467,6 @@ function TeacherCreateContent({ embedded = false, onCreated } = {}) {
       setGenerateLoading(false);
     }
   };
-
-  // AI refine functionality removed.
 
   const resetExerciseDraft = () => {
     setCreatedExerciseInfos([]);
@@ -737,7 +734,6 @@ function TeacherCreateContent({ embedded = false, onCreated } = {}) {
     try {
       const formData = new FormData();
       formData.append('file', vocabularyFile);
-      formData.append('validateWithAI', String(vocabularyUseAiValidation));
       const res = await api.post('/vocabulary/preview', formData, {
         timeout: 90000
       });
@@ -748,9 +744,7 @@ function TeacherCreateContent({ embedded = false, onCreated } = {}) {
         fileType: res.data?.fileType || 'unknown',
         source: res.data?.source || 'unknown',
         usedTable: Boolean(res.data?.usedTable),
-        totalRows: Number(res.data?.totalRows || 0),
-        aiValidationApplied: Boolean(res.data?.aiValidationApplied),
-        aiWarnings: Array.isArray(res.data?.aiWarnings) ? res.data.aiWarnings : []
+        totalRows: Number(res.data?.totalRows || 0)
       });
       setVocabularyPreviewMsg({
         type: 'success',
@@ -1078,12 +1072,6 @@ Không khôi phục lại được.`)) return;
                     <div>Loại file: <strong>{String(vocabularyParseMeta.fileType || '').toUpperCase()}</strong></div>
                     <div>Nguồn parse: <strong>{vocabularyParseMeta.source === 'table' ? 'Table structure' : 'Raw text fallback'}</strong></div>
                     <div>Bảng nhận diện: <strong>{vocabularyParseMeta.usedTable ? 'Có' : 'Không'}</strong> ({vocabularyParseMeta.totalRows} dòng)</div>
-                    <div>AI validation: <strong>{vocabularyParseMeta.aiValidationApplied ? 'Đã áp dụng' : 'Không áp dụng'}</strong></div>
-                    {vocabularyParseMeta.aiWarnings?.length > 0 && (
-                      <div style={{ marginTop: '6px', color: '#b45309' }}>
-                        {vocabularyParseMeta.aiWarnings.join(' | ')}
-                      </div>
-                    )}
                   </div>
                 )}
                 <div style={styles.tableWrapper}>
@@ -1879,7 +1867,6 @@ Không khôi phục lại được.`)) return;
                   ))}
                 </div>
 
-                {/* AI refine removed */}
 
               </div>
             )}

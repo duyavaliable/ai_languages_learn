@@ -6,8 +6,8 @@ import sequelize from '../config/database.js';
  *
  * VÌ SAO PHẢI CÓ BẢNG RIÊNG, KHÔNG DÙNG `exercises`. Model chấm phát âm cần
  * biết TRƯỚC người học phải đọc câu gì — nó so bản ghi với một văn bản đích.
- * Bảng `exercises` chứa đề VSTEP: câu hỏi trắc nghiệm, đề nói tự do, đoạn đọc
- * hiểu. Không có chỗ nào là "câu người học phải đọc to".
+ * Bảng `exercises` chứa đề: câu hỏi trắc nghiệm, đoạn đọc hiểu, đề viết.
+ * Không có chỗ nào là "câu người học phải đọc".
  *
  * Nếu lấy đại `reading_passage` của `exercises` làm văn bản đích thì hỏng: đoạn
  * đọc hiểu dài hàng trăm từ, trong khi model train trên câu dài tối đa 10 từ —

@@ -13,9 +13,7 @@ import courseRoutes from './routes/courses.js';
 import vocabularyRoutes from './routes/vocabulary.js';
 import userRoutes from './routes/users.js';
 import languageRoutes from './routes/languages.js';
-import aiRoutes from './routes/ai.js';
 import exerciseRoutes from './routes/exercises.js';
-import speechRoutes from './routes/speech.js';
 import pronunciationRoutes from './routes/pronunciation.js';
 import speakingPassageRoutes from './routes/speakingPassages.js';
 import speakingAttemptRoutes from './routes/speakingAttempts.js';
@@ -81,9 +79,9 @@ app.use('/api/vocabulary', vocabularyRoutes);
 // khong lien quan model Grammar.
 app.use('/api/users', userRoutes);
 app.use('/api/languages', languageRoutes);
-app.use('/api/ai', aiRoutes);
 app.use('/api/exercises', exerciseRoutes);
-app.use('/api/speech', speechRoutes);
+// Đã gỡ /api/ai (Gemini) và /api/speech (chấm "nói tự do" cũ): hệ thống không dùng AI bên ngoài,
+// bài nói chỉ có dạng đọc to theo văn bản cho trước, chấm bằng model của đồ án qua /api/pronunciation.
 // Chấm phát âm bằng model của đồ án. Dịch vụ Python riêng ở cổng 8000 —
 // xem services/pronunciationService.js. Node không chạy được PyTorch nên
 // không có cách nhúng model vào đây.

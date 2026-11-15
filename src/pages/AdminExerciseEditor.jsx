@@ -9,10 +9,9 @@ import AdminLayout, { AdminNotice } from '../components/admin/AdminLayout';
  * Sửa một bài tập (chỉ admin): tiêu đề, thời gian, đề bài, đoạn đọc / transcript,
  * bài mẫu, file nghe và TỪNG CÂU HỎI (nội dung, phương án, đáp án, giải thích).
  *
- * `questions_json` có ba dạng tuỳ loại bài, nên trình sửa câu hỏi cũng ba dạng:
- *   - 'line'   : đọc to (`speaking_mode = read_aloud`) — mỗi phần tử là một câu
- *                thoại { speaker, text, gloss };
- *   - 'prompt' : nói tự do — { subTopicHeading, content };
+ * `questions_json` có hai dạng tuỳ loại bài, nên trình sửa câu hỏi cũng hai dạng:
+ *   - 'line'   : bài nói (dạng bài đọc, `speaking_mode = read_aloud`) — mỗi phần
+ *                tử là một câu thoại { speaker, text, gloss };
  *   - 'mcq'    : còn lại (đọc, nghe, ngữ pháp, từ vựng, viết) — câu hỏi trắc
  *                nghiệm { question, options, correctAnswer, explanation, ... }.
  * Mọi trường KHÔNG hiện trên form (provenance, vstep_task, section...) được
@@ -122,11 +121,11 @@ export default function AdminExerciseEditor() {
   }, [dirty]);
 
   const skill = String(exercise?.skill_type || '');
-  const kind = exercise?.speaking_mode === 'read_aloud' ? 'line' : skill === 'speaking' ? 'prompt' : 'mcq';
+  const kind = skill === 'speaking' ? 'line' : 'mcq';
   const isWriting = skill === 'writing';
   const hasAudio = skill === 'listening' || Boolean(exercise?.audio_url);
   const showPassage = !['speaking', 'writing'].includes(skill);
-  const showSample = ['writing', 'speaking'].includes(skill) && kind !== 'line';
+  const showSample = isWriting;
 
   const change = (setter) => (value) => { setter(value); setDirty(true); };
   const updateQ = (i, patch) => {
@@ -143,9 +142,7 @@ export default function AdminExerciseEditor() {
     const nextId = questions.reduce((m, q) => Math.max(m, Number(q.id) || 0), 0) + 1;
     const blank = kind === 'line'
       ? { speaker: last.speaker || '', text: '', gloss: '' }
-      : kind === 'prompt'
-        ? { id: nextId, subTopicHeading: last.subTopicHeading || '', content: '', options: [], correct_answer: '' }
-        : { id: nextId, question: '', options: isWriting ? [] : ['', '', '', ''], correctAnswer: '', explanation: '', ...(last.section ? { section: last.section } : {}) };
+      : { id: nextId, question: '', options: isWriting ? [] : ['', '', '', ''], correctAnswer: '', explanation: '', ...(last.section ? { section: last.section } : {}) };
     setQuestions((prev) => [...prev, blank]);
     setDirty(true);
   };
@@ -185,7 +182,6 @@ export default function AdminExerciseEditor() {
     questions.forEach((q, i) => {
       const n = i + 1;
       if (kind === 'line' && !String(q.text || '').trim()) list.push(`Câu ${n}: chưa có nội dung câu.`);
-      if (kind === 'prompt' && !String(q.content || '').trim()) list.push(`Câu ${n}: chưa có câu hỏi.`);
       if (kind === 'mcq') {
         if (!String(q.question || '').trim()) list.push(`Câu ${n}: chưa có nội dung câu hỏi.`);
         if (!isWriting) {
@@ -294,7 +290,7 @@ export default function AdminExerciseEditor() {
                 <input className={inputCls} type="number" min="1" value={minutes} onChange={(e) => change(setMinutes)(e.target.value)} />
               </Field>
             </div>
-            {(taskPrompt || isWriting || skill === 'listening' || kind === 'prompt') && (
+            {(taskPrompt || isWriting || skill === 'listening') && (
               <Field label="Đề bài / hướng dẫn" hint={isWriting ? 'Đề bài người học thấy ở khung "Đề bài".' : undefined}>
                 <textarea className={`${inputCls} min-h-[110px] leading-6`} value={taskPrompt} onChange={(e) => change(setTaskPrompt)(e.target.value)} />
               </Field>
@@ -429,13 +425,6 @@ export default function AdminExerciseEditor() {
                       <Field label="Phiên âm / nghĩa (tuỳ chọn)"><input className={inputCls} value={q.gloss || ''} onChange={(e) => updateQ(i, { gloss: e.target.value })} /></Field>
                     </div>
                   </div>
-                )}
-
-                {kind === 'prompt' && (
-                  <>
-                    <Field label="Chủ đề"><input className={inputCls} value={q.subTopicHeading || ''} onChange={(e) => updateQ(i, { subTopicHeading: e.target.value })} /></Field>
-                    <Field label="Câu hỏi"><textarea className={`${inputCls} min-h-[70px]`} value={q.content || ''} onChange={(e) => updateQ(i, { content: e.target.value })} /></Field>
-                  </>
                 )}
 
                 {kind === 'mcq' && (

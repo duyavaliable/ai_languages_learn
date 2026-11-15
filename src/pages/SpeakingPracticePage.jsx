@@ -982,8 +982,7 @@ function SpeakingPracticePage() {
 
         {!loading && !error && sentences.length === 0 && (
           <p className="text-sm text-slate-500">
-            Bài này không có câu nào để đọc to. Nếu đây là đề nói tự do của VSTEP
-            thì nó không dùng model chấm phát âm.
+            Bài đọc này chưa có câu nào. Quản trị viên cần thêm nội dung cho bài.
           </p>
         )}
 

@@ -115,8 +115,8 @@ function HomePage() {
 
   const handleOpenExercise = (exercise) => {
     if (!exercise?.skill_type) return;
-    // Đọc to theo văn bản cho sẵn đi sang trang chấm phát âm riêng.
-    if (exercise.speaking_mode === 'read_aloud') {
+    // Bài nói (dạng bài đọc, văn bản cho sẵn) đi sang trang chấm phát âm riêng.
+    if (exercise.skill_type === 'speaking') {
       navigate(`/speaking/${exercise.id}`);
       return;
     }

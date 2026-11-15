@@ -16,7 +16,7 @@ export const primaryBtnCls = 'mt-2 inline-flex w-full items-center justify-cente
 
 const SKILLS = [
   { icon: Headphones, label: 'Nghe', note: 'Đề luyện có file nghe theo từng phần' },
-  { icon: Mic, label: 'Nói', note: 'Chấm phát âm khi đọc to' },
+  { icon: Mic, label: 'Nói', note: 'Chấm phát âm theo bài đọc' },
   { icon: BookOpen, label: 'Đọc', note: 'Đề đọc hiểu như đề thi thật' },
   { icon: PenLine, label: 'Viết', note: 'Nhận xét bài viết chi tiết' }
 ];

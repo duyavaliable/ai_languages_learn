@@ -1,13 +1,9 @@
 /**
  * Route chấm phát âm bằng model của đồ án.
  *
- * CHƯA ÁP DỤNG vào dự án web — xem README.md cùng thư mục.
- * Khi gắn: chép file này vào `ai_languages_learn/routes/`.
- *
- * ĐỂ RIÊNG khỏi `routes/speech.js` có chủ ý. `/api/speech/assess` gửi âm thanh
- * cho Gemini chấm câu nói TỰ DO theo thang VSTEP. Route này đối chiếu bản ghi
- * với VĂN BẢN MẪU đã biết trước, bằng model của đồ án. Trộn vào một endpoint
- * thì cả hai đều kém đi.
+ * Đây là đường chấm bài nói DUY NHẤT: đối chiếu bản ghi với bài đọc (văn bản mẫu
+ * đã biết trước), bằng model của đồ án. Không dùng AI bên ngoài. (Đường
+ * `/api/speech/assess` cũ gửi Gemini chấm "nói tự do" đã gỡ khỏi dự án.)
  *
  *   GET  /api/pronunciation/health        dịch vụ Python có sống không
  *   GET  /api/pronunciation/ja/sentences  42 câu chấm được ngữ điệu

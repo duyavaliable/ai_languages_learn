@@ -398,7 +398,7 @@ function AdminContentManager() {
                                 Sửa
                               </button>
                               <button
-                                onClick={() => navigate(e.speaking_mode === 'read_aloud' ? `/speaking/${e.id}` : `/exercises/${e.id}`)}
+                                onClick={() => navigate(e.skill_type === 'speaking' ? `/speaking/${e.id}` : `/exercises/${e.id}`)}
                                 className={`${btnSoft} bg-blue-50 text-blue-600 hover:bg-blue-100`}
                               >
                                 <Eye className="w-3.5 h-3.5" />

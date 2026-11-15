@@ -1,18 +1,14 @@
 /**
  * Cầu nối sang dịch vụ chấm phát âm bằng model của đồ án (Python).
  *
- * CHƯA ÁP DỤNG vào dự án web — xem README.md cùng thư mục.
- * Khi gắn: chép file này vào `ai_languages_learn/services/`.
- *
  * VÌ SAO LÀ DỊCH VỤ RIÊNG, KHÔNG PHẢI FILE MODEL NHÚNG VÀO NODE.
  * Model chạy trên PyTorch; backbone nặng 2,8 GB. Node không chạy được PyTorch,
  * nên không tồn tại "một file model" để import vào đây. Kiến trúc đúng:
  *
  *     trình duyệt -> Express (cổng 5000) -> dịch vụ Python (cổng 8000)
  *
- * KHÁC GÌ `aiService.gradeSpeechWithAI`: hàm đó gửi âm thanh cho Gemini chấm
- * câu nói TỰ DO theo thang VSTEP. Đường này đối chiếu với VĂN BẢN MẪU đã biết
- * trước, bằng model của đồ án. Hai câu hỏi khác nhau — nên để song song.
+ * Đường này đối chiếu bản ghi với BÀI ĐỌC (văn bản mẫu đã biết trước), bằng model
+ * của đồ án — không dùng AI bên ngoài.
  *
  * HAI NGÔN NGỮ KHÔNG ĐỐI XỨNG, giao diện phải đọc cờ `available`:
  *   tiếng Anh   model ĐÃ TRAIN trên nhãn người chấm -> có 4 điểm cấp câu

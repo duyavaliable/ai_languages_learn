@@ -1,15 +1,15 @@
-# AI Language Learning App
+# Lingua — English & Japanese Learning App
 
-A comprehensive language learning platform powered by AI, featuring personalized lessons, vocabulary training, grammar explanations, and pronunciation feedback.
+A platform for practicing English and Japanese by skill. It does not call any external AI service.
 
 ## Features
 
-- 🤖 AI-powered explanations and exercises
-- 📚 Structured courses and lessons
-- 📖 Vocabulary and grammar tracking
-- 🎤 Pronunciation evaluation
-- 📊 Progress tracking
-- 🏆 Streak system and achievements
+- 🎧 Listening / 📖 Reading / grammar / vocabulary: exams imported from PDF/DOCX files (scanned with OCR,
+  reviewed by an admin before saving), displayed like the original exam.
+- 🎤 Speaking: reading passages, scored for pronunciation by the project's own model
+  (separate Python service, `/api/pronunciation`).
+- ✍️ Writing: rule-based checking with LanguageTool (runs locally).
+- 👤 Accounts: email/password or Google sign-in; roles `admin` and `student`.
 
 ## Tech Stack
 
@@ -68,27 +68,15 @@ Not in git (stay on the local machine only): `uploads/` (audio, scanned exam ima
 - Login / sign-up / password change are rate-limited per IP (`middleware/rateLimit.js`).
 - Login tokens expire after 7 days and become invalid as soon as the password is changed.
 
-## Luong hoc moi
+## Services used by `npm run dev`
 
-1. Home page hien thi khoa hoc tieng Anh theo trinh do A2/B1/B2/C1.
-2. Nguoi hoc bam vao khoa hoc se vao trang ky nang: Nghe, Noi, Doc, Viet.
-3. Bam vao 1 ky nang se vao trang danh sach bai tap AI cua ky nang do.
-
-## Teacher AI Exercise Workflow
-
-Trang `TeacherCreateContent` da duoc sua de giao vien:
-
-1. Chon khoa hoc (B1/B2/C1/A2).
-2. Chon ky nang (reading/listening/writing/speaking).
-3. Tai file PDF/DOCX de quet PARTs.
-4. Chon mot hoac nhieu PART bang cac card hien thi.
-5. Bam `Tao ... bai` de tao mot bai rieng cho moi PART da chon.
-
-He thong se:
-- Tu dong lay CEFR level tu khoa hoc.
-- Dung prompt AI co san theo tung PART, khong can giao vien tu nhap prompt dai.
-- Tao mot exercise rieng cho moi PART da chon, de hien thi thanh nhieu card trong danh sach.
-- Luu bai tap voi metadata ky nang/CEFR de hien thi tren trang nguoi hoc.
+| Service | Port | Notes |
+|---|---|---|
+| Vite client | 3000 | React UI |
+| Express server | 5000 | API, `uploads/` |
+| LanguageTool | 8081 | writing check, `npm run lt:setup` once |
+| Pronunciation model (Python) | 8000 | started separately (`serve.py`), see `PRONUNCIATION_SERVICE_URL` |
+| PDF exam scanner (Python, PaddleOCR) | — | `SCAN_PYTHON`, requirements in `services/scan/requirements.txt` |
 
 ## OCR Support for Exercise Uploads
 
@@ -107,15 +95,3 @@ npm install tesseract.js
 - macOS: `brew install poppler`
 
 Neu thieu `pdftoppm`, he thong van co the preview neu file PDF co text san, nhung OCR cho PDF dang anh se khong chay.
-
-## Prompt AI da duoc dong goi
-
-Prompt nam trong `services/aiService.js` (ham `generateExercisesForCourseSkill`).
-
-No bao gom:
-- Muc tieu: tao bai tap tieng Anh theo skill + CEFR.
-- Rang buoc output JSON chuan.
-- Cau truc ket qua bat buoc: `question`, `options`, `correctAnswer`, `explanation`.
-- Quy tac cho speaking/writing: `options` la mang rong.
-
-Vi vay giao vien chi can thao tac chon, khong can viet prompt thu cong.
