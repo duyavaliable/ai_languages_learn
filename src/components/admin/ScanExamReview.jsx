@@ -224,7 +224,7 @@ export default function ScanExamReview({ data, onChange, onSave, onCancel, onAtt
           <p className="font-semibold text-rose-900">
             {answered < questions.length ? `Còn ${questions.length - answered}/${questions.length} câu chưa có đáp án` : 'Đã đủ đáp án'}
             {(data.emptySections || []).length > 0 && ` · ${data.emptySections.length} phần chỉ nghe chưa biết số câu`}
-            {' '}— gắn file đáp án để máy tự điền (không phải quét lại đề, chỉ mất vài giây):
+            {' '}— gắn file đáp án:
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
             <input type="file" accept=".pdf,application/pdf" onChange={(e) => setKeyFile(e.target.files?.[0] || null)} />
@@ -242,7 +242,6 @@ export default function ScanExamReview({ data, onChange, onSave, onCancel, onAtt
               Đọc đáp án
             </button>
           </div>
-          <p className="mt-1 text-xs text-rose-900">File nghe và tên phần đã chọn được giữ lại; chữ đã sửa tay trong câu sẽ trở về bản máy đọc.</p>
         </div>
       )}
 
@@ -267,7 +266,7 @@ export default function ScanExamReview({ data, onChange, onSave, onCancel, onAtt
                   <div key={'empty' + s.section} className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs">
                     <span className="w-14 font-semibold text-amber-900">Phần {i + 1}</span>
                     <span className="w-24 truncate text-slate-500" title={s.section}>{(s.section || '(ảnh)').split('\n')[0]}</span>
-                    <span className="text-amber-900">không in câu nào (chỉ nghe) — chưa biết số câu: gắn file đáp án ở trên, hoặc nhập</span>
+                    <span className="text-amber-900">chỉ nghe — nhập</span>
                     <input
                       type="number" min="1" max="50" className="w-24 rounded-lg border border-slate-300 px-2 py-1"
                       placeholder="số câu"
@@ -328,7 +327,6 @@ export default function ScanExamReview({ data, onChange, onSave, onCancel, onAtt
                 </div>
               );
             })}
-            {split && <p className="text-xs text-slate-600">Để trống tên thì dùng "tên bài — Phần N". Thời gian làm bài chia theo số câu của từng phần (ít nhất 5 phút).</p>}
           </div>
         </div>
       )}
@@ -349,11 +347,6 @@ export default function ScanExamReview({ data, onChange, onSave, onCancel, onAtt
               <button type="button" className="text-xs text-rose-700" onClick={() => onChange({ ...data, wholeAudio: null })}>Bỏ</button>
             </>
           )}
-          <span className="w-full text-xs text-sky-900">
-            {groups.length > 1
-              ? 'Phần nào đã chọn file riêng ở trên thì dùng file riêng; phần để trống dùng file chung này.'
-              : 'File nghe của bài.'}
-          </span>
         </div>
       )}
 

@@ -614,14 +614,17 @@ const DOCX_SKILLS = ['reading', 'listening'];
 
 export const previewDocxExam = async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: 'Chưa chọn file đề' });
-    const name = String(req.file.originalname || '').toLowerCase();
+    const file = req.files?.file?.[0] || req.file;
+    const keyFile = req.files?.keyFile?.[0] || null;
+    if (!file) return res.status(400).json({ message: 'Chưa chọn file đề' });
+    const name = String(file.originalname || '').toLowerCase();
     if (!name.endsWith('.docx')) {
       return res.status(400).json({ message: 'Chỉ nhận file Word .docx (file .doc cũ hãy lưu lại thành .docx).' });
     }
-    const { parseDocxExam } = await import('../services/docxExamService.js');
-    const exam = parseDocxExam(req.file.buffer);
-    return res.json({ fileName: req.file.originalname, ...exam });
+    const { parseDocxExam, keyBlocksFromFile } = await import('../services/docxExamService.js');
+    const keyBlocks = keyFile ? await keyBlocksFromFile(keyFile) : null;
+    const exam = parseDocxExam(file.buffer, { keyBlocks });
+    return res.json({ fileName: file.originalname, keyFileName: keyFile?.originalname || null, ...exam });
   } catch (error) {
     return res.status(400).json({ message: error.message });
   }

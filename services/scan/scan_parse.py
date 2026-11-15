@@ -189,7 +189,30 @@ def group_rows(lines, mh):
         r['ls'].sort(key=lambda l: l['box'][0])
         r['top'] = min(l['box'][1] for l in r['ls']); r['bottom'] = max(l['box'][3] for l in r['ls'])
         r['x0'] = r['ls'][0]['box'][0]; r['x1'] = r['ls'][-1]['box'][2]
+        # số đứng RIÊNG một ô OCR ở đầu hàng (số câu in trong khung: "27" rồi mới tới lời hỏi). Ghi lại NGAY
+        # từ OCR lượt 1: bước đọc lại cả hàng sau đó có thể ghép "27" với phần chữ thành một ô
+        # "27「わたし」は…", làm mất dấu hiệu "số đứng riêng" -> câu 27 bị coi là đoạn văn.
+        # (Hàng có thể CHỈ có ô "27" ở lượt này: lời hỏi được đọc bổ sung ở bước sau.)
+        if re.fullmatch(r'\s*\d{1,2}\s*', r['ls'][0]['text'].translate(FW)):
+            r['lead_num'] = int(r['ls'][0]['text'].translate(FW))
     return rows
+
+
+def _junk_row(t):
+    """Hàng 'chữ' sinh ra khi OCR đọc HOA VĂN (trang để trống của đề JLPT in kín ký hiệu nhỏ): toàn chữ
+    Hán ngẫu nhiên, không có kana, không có chữ/số Latin. Chữ Nhật thật dài >= 4 chữ hầu như luôn có kana."""
+    t = re.sub(r'\s', '', t)
+    if len(t) < 3 or re.search(r'[぀-ヿ]|[A-Za-z0-9０-９]', t):
+        return False
+    cjk = len(re.findall(r'[一-鿿]', t))
+    return cjk >= 0.8 * len(t)
+
+
+def filler_page(rows):
+    """Trang để trống in hoa văn: phần lớn các hàng là hàng rác (xem _junk_row)."""
+    texts = [' '.join(l['text'] for l in r['ls']) for r in rows]
+    junk = sum(_junk_row(t) for t in texts)
+    return junk >= 6 and junk >= 0.6 * len(texts)
 
 
 def load_page(ocr_dir, pno):
@@ -224,6 +247,10 @@ def build(pages, ocr_dir, out_dir, consecutive=True):
     pdata = []
     for pno in pages:
         img, ink, rows, figs, mh, ruby = load_page(ocr_dir, pno)
+        if filler_page(rows):
+            # trang trống in hoa văn (vd trang 4 của đề đọc N5): không có nội dung, bỏ cả trang
+            print('  p%d trang để trống (hoa văn, không có nội dung) — bỏ qua' % pno)
+            continue
         Ww = img.shape[1]
         clean = clean_page(img, ink, rows, mh)
         log = []
@@ -386,11 +413,16 @@ def build(pages, ocr_dir, out_dir, consecutive=True):
                 n = int(m.group(1))
                 # số câu thật: có dấu chấm / khoảng trắng sau số, hoặc số đứng riêng một ô OCR (số trong khung)
                 has_sep = (bool(re.match(r'^\s*[（(]?\d{1,2}[)）]?(\s*[.．。:]|\s)', t))
-                           or r['ls'][0]['text'].strip().isdigit() or boxed_number(r, ink, mh))
+                           or r['ls'][0]['text'].strip().isdigit() or boxed_number(r, ink, mh)
+                           or r.get('lead_num') == n)
                 in_col = qcol is None or r['x0'] <= qcol + 1.0 * mh
+                # số câu in cùng cỡ chữ thường; hàng chữ NHỎ (furigana sót lại, vd "2 なか つか" là furigana
+                # của "3本 / 中 / 使") không phải số câu — nhận nhầm sẽ làm lệch thứ tự mọi câu phía sau
+                full_size = (r['bottom'] - r['top']) >= 0.7 * mh
                 restart = n == 1 and has_sep and prev_id is not None and prev_id >= 5
-                plausible = in_col and ((prev_id is None and has_sep) or restart or (prev_id is not None and n == prev_id + 1)
-                                        or (prev_id is not None and has_sep and prev_id < n <= prev_id + 3))
+                plausible = in_col and full_size and (
+                    (prev_id is None and has_sep) or restart or (prev_id is not None and n == prev_id + 1)
+                    or (prev_id is not None and has_sep and prev_id < n <= prev_id + 3))
                 waiting_num = (cur is not None and cur['kind'] in (None, 'num') and kind == 'num'
                                and len(cur['opt_labels']) < 4 and str(n) == '1234'[len(cur['opt_labels'])])
                 if plausible and not waiting_num:
@@ -414,6 +446,16 @@ def build(pages, ocr_dir, out_dir, consecutive=True):
                         cur['rows'] = []
                         cur['num_row'] = r
                     continue
+            # --- "(2)" / "（3）" đứng riêng một dòng: nhãn của ĐOẠN VĂN tiếp theo (bài đọc hiểu nhiều đoạn).
+            # Kết thúc câu đang đọc; dòng này và các dòng sau là đoạn văn cho câu kế tiếp.
+            if re.fullmatch(r'[（(]\s*\d{1,2}\s*[)）]', t.strip()):
+                cur = None
+            # --- trong vùng phương án: hàng chữ NHỎ (furigana không gắn được, vd "なかがわせんせい") hoặc mẩu
+            # số rác ("242") không phải đoạn văn mới — bỏ qua, KHÔNG cắt ngang câu đang đọc
+            if (cur is not None and cur['opts'] and not kind and not m
+                    and ((r['bottom'] - r['top']) < 0.7 * mh or re.fullmatch(r'[\d\s\W]{1,4}', t))):
+                cur.setdefault('stray', []).append(t[:40])
+                continue
             # --- phương án dài bị xuống dòng: hàng không có nhãn, thụt vào bằng phần chữ của phương án
             prev_h = cur['opts'][-1]['bottom'] - cur['opts'][-1]['top'] if cur is not None and cur['opts'] else 0
             if (cur is not None and cur['opts'] and not kind and not m
@@ -671,6 +713,14 @@ def build(pages, ocr_dir, out_dir, consecutive=True):
                 # điểm tin cậy chỉ tính trên phương án (dòng "Nばん" là tiêu đề)
                 osc = [l['score'] for r in b['opts'] for l in r['ls']]
                 q['low'] = min(osc) if osc else 1.0
+            elif not opts and fig_files and q['question']:
+                # câu đọc hiểu chọn TRANH ("今の へやは どれですか。" + 4 tranh đánh số 1-4): phương án nằm
+                # trong hình -> hiện hình + nút 1..N như đề nghe. Số phương án lấy từ lời hướng dẫn của mục.
+                no = n_options(q['section']) or 4
+                q['answer_only'] = True
+                q['n_opt'] = no
+                q['labels'] = [str(k + 1) for k in range(no)]
+                q['kind'] = 'num'
             qs.append(q)
             page_q.append((q, b))
         check_voicing(page_q, img, clean)

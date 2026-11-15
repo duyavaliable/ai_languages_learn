@@ -2,8 +2,10 @@
 Mỗi tiêu đề ('Đáp án ...', '正答', '問題 1'...) mở một bảng mới.
 
 Bất biến bắt buộc (không đạt -> KHÔNG dùng bảng đó, báo admin):
-  - số câu trong bảng liền nhau 1..N, không trùng,
+  - số câu trong bảng liền nhau (a..b), không trùng — KHÔNG bắt đầu từ 1: đề JLPT đánh số liên tục qua các
+    mục (問題2 là câu 11–18, 問題4 phần đọc là 27–29),
   - mỗi số câu có đúng một đáp án.
+Bảng ngắn (問題6 chỉ có câu 32) vẫn được nhận khi tiêu đề mục nằm cùng hàng và có hàng đáp án ngay dưới.
 """
 import re, json, os, statistics, unicodedata
 from build import FW
@@ -71,6 +73,7 @@ def parse_lines(lines, verbose=False, part=None):
         if pm and not HEAD_RE.search(txt) and not any(NUM.match(c['t']) for c in r):
             part = re.sub(r'\s', '', pm.group(0)); cur = None
             continue
+        with_head = False
         if HEAD_RE.search(txt) and not all(NUM.match(c['t']) for c in r):
             # tiêu đề bảng có thể nằm CÙNG HÀNG với dãy số câu ('問題１ 例 1 2 3 ...' ở bảng có lớp chữ)
             head = [c for c in r if not (NUM.match(c['t']) or c['t'] in ('例', 'れい'))]
@@ -78,13 +81,16 @@ def parse_lines(lines, verbose=False, part=None):
             cur = {'title': ' '.join(dict.fromkeys(c['head'] for c in head)).strip(), 'keys': {}, 'dup': [], 'low': [],
                    'part': part}
             tables.append(cur)
-            if len(rest) < 3:
+            if not rest:
                 continue
-            r = rest
+            r = rest; with_head = True
         nums = [NUM.match(c['t']) for c in r]
-        if cur is None or len(r) < 3 or sum(bool(m) for m in nums) < 0.8 * len(r):
-            continue
         ans = sorted([c for c in rows[i + 1] if ANS.match(c['t'])], key=lambda c: c['x']) if i + 1 < len(rows) else []
+        # hàng số câu: >= 3 ô, hoặc ít ô hơn (問題5: 30 31, 問題6: 32) khi tiêu đề mục nằm cùng hàng / hàng chỉ
+        # gồm số câu, VÀ hàng ngay dưới có đủ một đáp án cho mỗi số câu
+        short_ok = all(nums) and len(ans) == len(r)
+        if cur is None or (len(r) < 3 and not short_ok) or sum(bool(m) for m in nums) < 0.8 * len(r):
+            continue
         if ans:
             used.add(i + 1)
         for c, m in zip(r, nums):
@@ -110,7 +116,7 @@ def parse_lines(lines, verbose=False, part=None):
         probs = []
         if t['dup']:
             probs.append('số câu lặp: %s' % t['dup'])
-        miss = sorted(set(range(1, ks[-1] + 1)) - set(ks))
+        miss = sorted(set(range(ks[0], ks[-1] + 1)) - set(ks))
         if miss:
             probs.append('thiếu số câu: %s' % miss)
         t['problems'] = probs

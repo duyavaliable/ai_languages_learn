@@ -13,8 +13,10 @@ router.delete('/:id', protect, authorize('admin'), deleteExercise);
 router.put('/:id/audio', protect, authorize('admin'), uploadAudio.single('audioFile'), replaceExerciseAudio);
 router.patch('/:id/restore', protect, authorize('admin'), restoreExercise);
 router.post('/preview-parts', protect, authorize('admin'), uploadVocabulary.single('file'), previewExerciseFile);
-// Đề trắc nghiệm Word (.docx) Đọc / Nghe: xem trước -> admin duyệt -> lưu
-router.post('/docx-preview', protect, authorize('admin'), uploadVocabulary.single('file'), previewDocxExam);
+// Đề trắc nghiệm Word (.docx) Đọc / Nghe: xem trước -> admin duyệt -> lưu.
+// `keyFile` (tuỳ chọn): file đáp án riêng .docx / .txt / .pdf có lớp chữ.
+router.post('/docx-preview', protect, authorize('admin'),
+  uploadVocabulary.fields([{ name: 'file', maxCount: 1 }, { name: 'keyFile', maxCount: 1 }]), previewDocxExam);
 router.post('/docx-create', protect, authorize('admin'), uploadAudio.single('audioFile'), createDocxExam);
 // Đề PDF quét (Đọc / Nghe): bắt đầu quét nền -> hỏi tiến độ -> admin duyệt -> lưu
 router.post('/scan-start', protect, authorize('admin'),

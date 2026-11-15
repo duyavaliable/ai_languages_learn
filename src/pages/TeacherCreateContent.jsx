@@ -120,6 +120,7 @@ function TeacherCreateContent({ embedded = false, onCreated } = {}) {
   // Đề trắc nghiệm Word (.docx) Đọc / Nghe: kết quả quét chờ admin duyệt
   const [docxExam, setDocxExam] = useState(null);
   const [docxSaving, setDocxSaving] = useState(false);
+  const [docxKeyFile, setDocxKeyFile] = useState(null);   // file đáp án riêng cho đề Word (không bắt buộc)
   // Đề PDF quét Đọc / Nghe: phiên quét chạy nền trên server, xong thì admin duyệt
   const [scanKeyFile, setScanKeyFile] = useState(null);
   const [scanPages, setScanPages] = useState('');
@@ -492,6 +493,8 @@ function TeacherCreateContent({ embedded = false, onCreated } = {}) {
   const handleExerciseLanguageChange = (languageId) => {
     const selectedLanguage = languages.find((lang) => String(lang.id) === String(languageId));
     const isJapanese = String(selectedLanguage?.code || '').toLowerCase() === 'ja';
+    // đổi ngôn ngữ cũng đổi kỹ năng -> bỏ kết quả quét chưa lưu như khi đổi kỹ năng
+    if (!discardScanForSkillChange()) return;
     setExerciseForm((prev) => ({
       ...prev,
       language_id: languageId,
@@ -534,6 +537,24 @@ function TeacherCreateContent({ embedded = false, onCreated } = {}) {
     setScanExam(null);
   };
 
+  // Kết quả quét CHƯA LƯU (mọi loại đề: Word, PDF quét, PDF/DOCX tách phần) gắn với kỹ năng lúc quét.
+  // Đổi kỹ năng / ngôn ngữ thì bỏ kết quả đó (hỏi trước), huỷ lượt quét đang chạy; GIỮ file đề đã chọn để
+  // quét lại theo kỹ năng mới. Trả về false nếu admin không đồng ý (giữ nguyên kỹ năng cũ).
+  const hasUnsavedScan = Boolean(scanExam || docxExam || exerciseParts.length || scanActive);
+  const discardScanForSkillChange = () => {
+    if (!hasUnsavedScan) return true;
+    if (!window.confirm('Đổi kỹ năng sẽ bỏ kết quả quét chưa lưu (phải quét lại theo kỹ năng mới). Tiếp tục?')) return false;
+    setExerciseParts([]);
+    setExerciseSelectedParts([]);
+    setDocxExam(null);
+    setScanSaveError(null);
+    if (scanJob) cancelPdfScan();      // huỷ lượt quét đang chạy / dọn thư mục phiên quét trên server
+    setScanJob(null);
+    setScanExam(null);
+    showMsg('info', 'Đã bỏ kết quả quét chưa lưu. Bấm "Quét nội dung" để quét lại theo kỹ năng mới.');
+    return true;
+  };
+
   // Đề Word cho Đọc / Nghe đi đường riêng: bộ đọc cấu trúc + tự sửa lỗi gõ, rồi admin duyệt.
   const isDocxExamFlow = (file) => Boolean(file)
     && /\.docx$/i.test(file.name || '')
@@ -545,6 +566,7 @@ function TeacherCreateContent({ embedded = false, onCreated } = {}) {
     try {
       const formData = new FormData();
       formData.append('file', exerciseFile);
+      if (docxKeyFile) formData.append('keyFile', docxKeyFile);
       const res = await api.post('/exercises/docx-preview', formData, { timeout: 90000 });
       setDocxExam(res.data);
       const w = (res.data?.warnings || []).length;
@@ -574,6 +596,7 @@ function TeacherCreateContent({ embedded = false, onCreated } = {}) {
       showMsg('success', `Đã lưu bài "${manualTitle}" (${created[0]?.questionCount || 0} câu) vào kho bài tập.`);
       setDocxExam(null);
       setExerciseFile(null);
+      setDocxKeyFile(null);
       setListeningAudioFile(null);
       if (onCreated) onCreated(created);
     } catch (err) {
@@ -1025,7 +1048,6 @@ Không khôi phục lại được.`)) return;
         {mode === 'vocabulary' && (
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Tạo / cập nhật Vocabulary</h3>
-            <p style={styles.hintText}>Upload file PDF hoặc DOCX, hệ thống sẽ quét nội dung và cho bạn xem trước dưới dạng bảng.</p>
 
             {vocabularyMsg && <div style={vocabularyMsg.type === 'success' ? styles.successBanner : styles.errorBanner}>{vocabularyMsg.text}</div>}
             {vocabularyPreviewMsg && <div style={vocabularyPreviewMsg.type === 'success' ? styles.successBanner : styles.errorBanner}>{vocabularyPreviewMsg.text}</div>}
@@ -1249,10 +1271,6 @@ Không khôi phục lại được.`)) return;
 
                   {showDeletedVocab && (
                     <div style={{ marginTop: '10px' }}>
-                      <p style={styles.helperText}>
-                        Từ trong thùng rác không hiện cho người học. Khôi phục được
-                        bất cứ lúc nào. Xóa hẳn thì không lấy lại được.
-                      </p>
                       <div style={styles.tableWrapper}>
                         <table style={styles.table}>
                           <thead>
@@ -1310,7 +1328,6 @@ Không khôi phục lại được.`)) return;
         {mode === 'exercise' && (
           <div style={styles.card}>
             <h3 style={styles.cardTitle}>Tạo Exercise</h3>
-            <p style={styles.hintText}>Giáo viên chọn kỹ năng. Hệ thống sẽ quét file, tách phần nội dung và tạo một bài riêng cho mỗi phần đã chọn.</p>
             {generateLoading && (
               <div style={styles.loadingBanner}>
                 <span style={styles.loadingDot} />
@@ -1327,6 +1344,7 @@ Không khôi phục lại được.`)) return;
                   value={exerciseForm.skill}
                   onChange={(e) => {
                     const nextSkill = e.target.value;
+                    if (!discardScanForSkillChange()) return;
                     setExerciseForm((p) => ({
                       ...p,
                       skill: nextSkill
@@ -1410,11 +1428,7 @@ Không khôi phục lại được.`)) return;
               />
               {isPdfScanFlow(exerciseFile) && (
                 <div style={{ marginTop: '10px', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#f8fafc' }}>
-                  <div style={styles.helperText}>
-                    Đề PDF được quét bằng OCR ngay trên máy chủ (đọc được cả bản scan), đề 14 trang mất khoảng 2 phút. Chỗ máy đọc không chắc sẽ hiện bằng ảnh gốc của đề.
-                    {exerciseForm.skill === 'listening' && ' Bài nghe: quét đề trước, sau đó gán file nghe ở bước duyệt (một file cho cả đề hoặc mỗi phần một file).'}
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginTop: '8px', alignItems: 'end' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', alignItems: 'end' }}>
                     <div>
                       <label style={styles.label}>Trang đề cần quét</label>
                       <input style={styles.input} value={scanPages} onChange={(e) => setScanPages(e.target.value)} placeholder="vd: 3-16 (để trống = mọi trang)" />
@@ -1428,18 +1442,24 @@ Không khôi phục lại được.`)) return;
                       <input style={styles.input} value={scanKeyPages} onChange={(e) => setScanKeyPages(e.target.value)} placeholder={scanKeyFile ? 'để trống = mọi trang của file đáp án' : 'để trống = tự tìm ở cuối file đề'} />
                     </div>
                   </div>
-                  <div style={styles.helperText}>
-                    Đáp án lấy theo thứ tự: file đáp án riêng (nếu có tải lên) → bảng đáp án ở cuối file đề (tự tìm, trang đáp án không bị coi là trang đề).
-                    Không tìm thấy thì chọn đáp án ở bước duyệt. Bỏ trang bìa / trang trắng để không sinh câu rác.
-                    {exerciseForm.skill === 'listening' && !scanKeyFile && ' Bài nghe nên có file đáp án: phần chỉ nghe không in câu nào (vd もんだい4) chỉ biết số câu nhờ bảng đáp án. Quên thì vẫn gắn được ở bước duyệt, không phải quét lại.'}
-                  </div>
+                </div>
+              )}
+              {isDocxExamFlow(exerciseFile) && (
+                <div style={{ marginTop: '10px', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                  <label style={styles.label}>File đáp án riêng (không bắt buộc: .docx, .txt hoặc .pdf có chữ)</label>
+                  <input
+                    type="file"
+                    accept=".docx,.txt,.pdf,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    style={styles.input}
+                    onChange={(e) => { setDocxKeyFile(e.target.files?.[0] || null); setDocxExam(null); }}
+                  />
                 </div>
               )}
               <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
                 <button type="button" onClick={previewExerciseFile} style={styles.submitBtn} disabled={exercisePreviewLoading || !exerciseFile || scanActive}>
                   {exercisePreviewLoading || scanActive ? 'Đang quét...' : 'Quét nội dung'}
                 </button>
-                <button type="button" onClick={() => { handleExerciseFileChange(null); setScanKeyFile(null); }} style={styles.cancelBtn}>
+                <button type="button" onClick={() => { handleExerciseFileChange(null); setScanKeyFile(null); setDocxKeyFile(null); }} style={styles.cancelBtn}>
                   Xóa
                 </button>
               </div>
@@ -1552,11 +1572,6 @@ Không khôi phục lại được.`)) return;
             {exerciseForm.skill === SPEAKING_SKILL && (
               <form onSubmit={submitSpeakingPassage} style={{ marginTop: '16px', paddingTop: '16px', borderTop: '2px solid #e2e8f0' }}>
                 <h4 style={styles.subTitle}>Bài đọc cho kỹ năng Nói</h4>
-                <p style={styles.hintText}>
-                  Kỹ năng Nói không quét file đề. Model chấm phát âm cần biết
-                  trước người học phải đọc câu gì, nên bạn nhập thẳng nội dung.
-                  <strong> Mỗi dòng là một lần đọc và được chấm riêng.</strong>
-                </p>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div>
@@ -1613,11 +1628,6 @@ Không khôi phục lại được.`)) return;
                         ? 'あかいいすでたべる\nくらいえきでたべる'
                         : 'The weather is nice today.\nI walk to school every morning.')}
                   />
-                  <div style={styles.helperText}>
-                    {isJapaneseExercise
-                      ? 'Tiếng Nhật: chỉ những câu có mốc người bản ngữ mới chấm được tiêu chí Ngữ điệu. Server tự kiểm và báo lại sau khi lưu — bạn không cần tự đánh dấu.'
-                      : 'Tiếng Anh: nên giữ 4–10 từ mỗi câu. Model train trên câu dài tối đa 10 từ; câu dài hơn là dùng model ngoài miền và điểm mất ý nghĩa.'}
-                  </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
@@ -1639,11 +1649,6 @@ Không khôi phục lại được.`)) return;
                       placeholder="Ví dụ: CC BY 2.0 FR"
                     />
                   </div>
-                </div>
-                <div style={{ ...styles.helperText, marginTop: '6px' }}>
-                  ⚠️ Không nạp nội dung có bản quyền (Minna no Nihongo và các
-                  giáo trình khác). Nguồn mở dùng được: Tatoeba (CC BY), hoặc
-                  tự soạn.
                 </div>
 
                 {speakingMsg && (
@@ -2014,7 +2019,6 @@ const styles = {
     border: '1px solid #f1f5f9'
   },
   cardTitle: { marginTop: 0, marginBottom: '14px', color: '#0f172a', fontSize: '20px', letterSpacing: '-0.02em' },
-  hintText: { marginTop: 0, marginBottom: '14px', color: '#52606d', fontSize: '14px', lineHeight: 1.6 },
   loadingBanner: {
     marginBottom: '12px',
     padding: '10px 12px',

@@ -148,11 +148,130 @@ const SUB_RE = /^\s*Questions?\s+(\d+)\s*(?:[-–]|to)\s*(\d+)/i;
 const Q_RE = /^\s*(\d{1,2})(?:\s*[.)]\s*|\s+)(?=\S)/;
 const OPT_RE = /^\s*([A-D])\s*[.)]\s*/;
 const OPT_SPLIT = /(?:(?<=\n)|(?<=\t)|(?<=\s{2}))\s*(?=[A-D]\s*[.)]\s*\S)/g;
-const KEY_RE = /^\s*(ANSWER\s*KEY|DAP\s*AN|KEY)\b/i;
+// Tiêu đề phần đáp án — tiếng Việt hoặc tiếng Anh, hoa / thường: "ĐÁP ÁN", "Đáp án và giải thích", "ANSWER KEY",
+// "Answers", "Key", "KEYS", "Key to the test", "Suggested answers", "Answer sheet". Sau tiêu đề chỉ được là hết dòng,
+// dấu ":" / "." / "-" hoặc đáp án viết luôn ("KEY 1.B 2.C"): "Answer the questions below" KHÔNG phải tiêu đề.
+const KEY_RE = /^\s*(?:(?:SUGGESTED\s+)?ANSWERS?(?:\s*(?:KEYS?|SHEET))?|KEYS?(?:\s+TO\s+(?:THE\s+)?(?:TEST|EXAM|QUESTIONS?))?|(?:GOI\s*Y\s*)?DAP\s*AN(?:\s+\S.*)?)\s*(?:[:.\-–]|$|(?=\s*\d))/i;
 const LEVEL_RE = /^\s*(DO\s*KHO|LEVEL|DIFFICULTY)\b/i;
 const INTRO_RE = /^\s*(Directions?|Now,|On the (recording|test book)|The correct answer)/i;
 
-export function parseDocxExam(buffer) {
+// ----- ĐỌC BẢNG / DANH SÁCH ĐÁP ÁN -----
+// Gặp nhiều kiểu trình bày; đọc được hết các kiểu sau (số câu + chữ A–D):
+//   bảng ô xen kẽ     | 1 | C | 6 | A | 11 | B |        (VSTEP READING 9)
+//   bảng theo cột     | 1 | 2 | 3 |  rồi hàng dưới  | B | C | A |
+//   ô gộp             | 1.B | 2-C | 3) A | 4B |
+//   bảng chỉ có chữ   | B | C | A | D |                 (đọc theo hàng, trái sang phải = câu 1, 2, 3…)
+//   dòng chữ          "1. B   2. C", "1-B; 2-C", "Question 1: B", "1) B"
+const KEY_NUM = /^\d{1,3}$/;
+const KEY_LET = /^[A-Da-d]$/;
+const KEY_CELL = /^(\d{1,3})\s*[.):\-–]?\s*([A-Da-d])\.?$/;
+// trong dòng chữ chỉ nhận chữ IN HOA (tránh "2 a lot" trong lời giải thích)
+const KEY_TEXT = /(?:^|[\s,;|\t(])(?:Question\s*|Câu\s*)?(\d{1,3})\s*[.):\-–]?\s*([A-D])(?=$|[\s,;|.)\t])/gi;
+
+function addKey(keys, n, a) {
+  keys.set(n, [...(keys.get(n) || []), a.toUpperCase()]);
+}
+
+/** Một bảng đáp án -> keys. Trả về true nếu đọc được ít nhất một đáp án. */
+function keysFromTable(table, keys) {
+  const rows = table.map((r) => r.map((c) => String(c || '').trim()).filter((c) => c !== ''));
+  let found = 0;
+  const used = new Set();
+  // bảng theo cột: hàng toàn số câu + hàng ngay dưới toàn chữ cái, cùng số ô
+  for (let i = 0; i + 1 < rows.length; i += 1) {
+    const a = rows[i]; const b = rows[i + 1];
+    if (a.length && a.length === b.length && a.every((c) => KEY_NUM.test(c)) && b.every((c) => KEY_LET.test(c))) {
+      a.forEach((c, k) => addKey(keys, Number(c), b[k]));
+      used.add(i); used.add(i + 1); found += a.length; i += 1;
+    }
+  }
+  rows.forEach((r, i) => {
+    if (used.has(i)) return;
+    for (let k = 0; k < r.length; k += 1) {
+      const cm = r[k].match(KEY_CELL);
+      if (cm) { addKey(keys, Number(cm[1]), cm[2]); found += 1; continue; }
+      if (KEY_NUM.test(r[k]) && k + 1 < r.length && KEY_LET.test(r[k + 1])) {
+        addKey(keys, Number(r[k]), r[k + 1]); found += 1; k += 1; continue;
+      }
+      // ô chứa cả dãy "1.B 2.C"
+      for (const mm of r[k].matchAll(KEY_TEXT)) { addKey(keys, Number(mm[1]), mm[2]); found += 1; }
+    }
+  });
+  return found > 0;
+}
+
+/** Danh sách khối (đoạn văn / bảng) ĐÃ NẰM TRONG phần đáp án -> keys; bảng chỉ có chữ cái để cuối cùng. */
+function keysFromBlocks(blocks, keys, notes) {
+  const letterOnly = [];
+  for (const blk of blocks) {
+    if (blk.table) {
+      if (!keysFromTable(blk.table, keys)) {
+        const cells = blk.table.flat().map((c) => String(c || '').trim()).filter(Boolean);
+        if (cells.length && cells.every((c) => KEY_LET.test(c))) letterOnly.push(...cells);
+      }
+      continue;
+    }
+    const t = txt(blk.runs || []);
+    for (const mm of t.matchAll(KEY_TEXT)) addKey(keys, Number(mm[1]), mm[2]);
+  }
+  if (!keys.size && letterOnly.length) {
+    letterOnly.forEach((c, i) => addKey(keys, i + 1, c));
+    notes.push(`Bảng đáp án không ghi số câu: đọc theo hàng, trái sang phải (${letterOnly.length} ô = ${letterOnly.length} câu)`);
+  }
+}
+
+/** Chữ của file PDF có lớp chữ, theo từng dòng (dùng cho file đáp án riêng dạng PDF). */
+async function pdfTextLines(buffer) {
+  const { default: PDFParser } = await import('pdf2json');
+  const data = await new Promise((resolve, reject) => {
+    const p = new PDFParser(null, 1);
+    p.on('pdfParser_dataError', (e) => reject(e?.parserError || e));
+    p.on('pdfParser_dataReady', resolve);
+    p.parseBuffer(buffer);
+  });
+  const lines = [];
+  for (const page of data?.Pages || []) {
+    const byY = new Map();
+    for (const t of page.Texts || []) {
+      const y = Math.round(t.y * 2) / 2;
+      let s = ''; try { s = decodeURIComponent(t.R?.[0]?.T || ''); } catch { s = t.R?.[0]?.T || ''; }
+      byY.set(y, [...(byY.get(y) || []), [t.x, s]]);
+    }
+    [...byY.keys()].sort((a, b) => a - b).forEach((y) => {
+      lines.push(byY.get(y).sort((a, b) => a[0] - b[0]).map(([, s]) => s).join('  '));
+    });
+  }
+  return lines;
+}
+
+/**
+ * File đáp án RIÊNG (.docx / .txt / .pdf có lớp chữ) -> danh sách khối. Có tiêu đề đáp án ("Key", "Đáp án"…)
+ * thì chỉ lấy phần sau tiêu đề; không có thì cả file là đáp án.
+ */
+export async function keyBlocksFromFile(file) {
+  const name = String(file?.originalname || '').toLowerCase();
+  let blocks;
+  if (name.endsWith('.docx')) {
+    const zip = new PizZip(file.buffer);
+    const doc = zip.file('word/document.xml');
+    if (!doc) throw new Error('File đáp án không phải tài liệu Word hợp lệ.');
+    blocks = readBlocks(doc.asText());
+  } else if (name.endsWith('.txt')) {
+    blocks = file.buffer.toString('utf8').split(/\r?\n/).map((l) => ({ runs: [[l, {}]] }));
+  } else if (name.endsWith('.pdf')) {
+    const lines = await pdfTextLines(file.buffer);
+    if (!lines.join('').trim()) throw new Error('File đáp án PDF không có lớp chữ (PDF chụp ảnh) — hãy dùng file .docx/.txt, hoặc chọn đáp án tay ở bước duyệt.');
+    blocks = lines.map((l) => ({ runs: [[l, {}]] }));
+  } else {
+    throw new Error('File đáp án phải là .docx, .txt hoặc .pdf có lớp chữ.');
+  }
+  const at = blocks.findIndex((b) => !b.table && KEY_RE.test(plain(txt(b.runs || []).trim())));
+  if (at < 0) return blocks;
+  // đáp án viết ngay trên dòng tiêu đề ("KEY: 1.B 2.C") vẫn được đọc
+  return blocks.slice(at);
+}
+
+export function parseDocxExam(buffer, { keyBlocks = null } = {}) {
   const zip = new PizZip(buffer);
   const docFile = zip.file('word/document.xml');
   if (!docFile) throw new Error('File không phải tài liệu Word hợp lệ (thiếu word/document.xml).');
@@ -169,7 +288,7 @@ export function parseDocxExam(buffer) {
   let lastQ = null;
   let mode = null;
   const keys = new Map(); const levels = new Map();
-  let keyTable = null;
+  const keyPart = [];        // các khối nằm trong phần đáp án của chính file đề
   let images = 0;
 
   const newGroup = (head, a, b) => {
@@ -187,7 +306,7 @@ export function parseDocxExam(buffer) {
   for (let blk of blocks) {
     if (blk.table) {
       const cells = blk.table.flat();
-      if (mode === 'key') { keyTable = blk.table; continue; }
+      if (mode === 'key') { keyPart.push(blk); continue; }
       if (cells.length === 1 && SEC_RE.test(cells[0])) {
         blk = { runs: [[cells[0], { b: true, i: false, u: false, hl: false }]] };
       } else {
@@ -200,14 +319,12 @@ export function parseDocxExam(buffer) {
     if (!t) continue;
     if (t.includes('￼')) images += 1;
     const pt = plain(t);
-    if (KEY_RE.test(pt)) { mode = 'key'; continue; }
+    // tiêu đề phần đáp án: chỉ nhận khi KHÔNG phải số câu / phương án ("1. Answer ..." là câu hỏi)
+    if (KEY_RE.test(pt) && !Q_RE.test(t) && !OPT_RE.test(t)) { mode = 'key'; keyPart.push(blk); continue; }
     if (LEVEL_RE.test(pt)) { mode = 'level'; continue; }
-    if (mode === 'key' || mode === 'level') {
-      for (const mm of t.matchAll(/(\d{1,2})\s*[.)]?\s*(?:\(\s*(\d)\s*\)|([A-D])\b)/g)) {
-        const n = Number(mm[1]);
-        if (mode === 'key' && mm[3]) keys.set(n, [...(keys.get(n) || []), mm[3]]);
-        else if (mode === 'level' && mm[2]) levels.set(n, Number(mm[2]));
-      }
+    if (mode === 'key') { keyPart.push(blk); continue; }
+    if (mode === 'level') {
+      for (const mm of t.matchAll(/(\d{1,2})\s*[.)]?\s*\(\s*(\d)\s*\)/g)) levels.set(Number(mm[1]), Number(mm[2]));
       continue;
     }
     let m = t.match(SEC_RE);
@@ -301,20 +418,35 @@ export function parseDocxExam(buffer) {
       }
     }
   }
-  if (keyTable && !keys.size) {
-    const cells = keyTable.flat().map((c) => c.trim());
-    if (cells.length && cells.every((c) => /^[A-D]$/.test(c))) {
-      cells.forEach((c, i) => keys.set(i + 1, [c]));
-      fixes.push(`Bảng đáp án không ghi số câu: đọc theo hàng, trái sang phải (${cells.length} ô = ${cells.length} câu)`);
-    }
+  // Đáp án: file đáp án RIÊNG (admin tải kèm) được ưu tiên; không có thì dùng phần đáp án cuối file đề.
+  let keySource = null;
+  if (keyBlocks) {
+    keysFromBlocks(keyBlocks, keys, fixes);
+    keySource = 'file đáp án riêng';
+    if (!keys.size) warnings.push('File đáp án riêng không đọc được đáp án nào (cần dạng "1. B", bảng số câu + đáp án, …)');
+  }
+  if (!keys.size && keyPart.length) {
+    keysFromBlocks(keyPart, keys, fixes);
+    keySource = 'phần đáp án cuối file đề';
   }
   const keyIds = [...keys.keys()].sort((a, b) => a - b);
-  const keyOk = keyIds.length === n && keyIds.every((k, i) => k === i + 1) && [...keys.values()].every((v) => v.length === 1);
-  if (keys.size && !keyOk) warnings.push(`Đáp án không khớp số câu (${keys.size} đáp án cho ${n} câu) — chưa gắn đáp án, admin chọn tay`);
-  if (!keys.size) warnings.push('Không thấy bảng đáp án — admin chọn đáp án cho từng câu');
+  const dupIds = keyIds.filter((k) => keys.get(k).length > 1 && new Set(keys.get(k)).size > 1);
+  const missIds = questions.map((q) => q.id).filter((id) => !keys.has(id));
+  const extraIds = keyIds.filter((k) => !questions.some((q) => q.id === k));
+  const keyOk = keys.size > 0 && !dupIds.length && !missIds.length && !extraIds.length;
+  if (keys.size && !keyOk) {
+    const why = [
+      missIds.length && `thiếu đáp án câu ${missIds.join(', ')}`,
+      extraIds.length && `có đáp án cho câu không có trong đề: ${extraIds.join(', ')}`,
+      dupIds.length && `câu có hai đáp án khác nhau: ${dupIds.join(', ')}`
+    ].filter(Boolean).join('; ');
+    warnings.push(`Đáp án (${keySource}) không khớp đề: ${why} — chưa gắn đáp án, admin chọn tay hoặc sửa file đáp án`);
+  }
+  if (keyOk) fixes.push(`Đã gắn đáp án ${n} câu từ ${keySource}`);
+  if (!keys.size) warnings.push('Không thấy đáp án (trong file đề không có phần "Đáp án / Answer key / Key", cũng chưa gắn file đáp án riêng) — admin chọn đáp án cho từng câu hoặc gắn file đáp án');
   for (const q of questions) {
     if (keyOk) {
-      const a = keys.get(q.id)[0];
+      const a = keys.get(q.id)[0];   // cùng một đáp án ghi hai lần (bảng + dòng chữ) vẫn hợp lệ
       if (q.labels.includes(a)) q.answer = a;
       else warnings.push(`Câu ${q.id}: đáp án ${a} không có trong phương án`);
     }

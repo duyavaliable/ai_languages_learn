@@ -769,7 +769,13 @@ def account_ink(rows, ruby, clean, mh, Ww, figs, log):
         x0 = min(l['box'][0] for l in r['ls']); x1 = max(l['box'][2] for l in r['ls'])
         y0 = min(l['box'][1] for l in r['ls']); y1 = max(l['box'][3] for l in r['ls'])
         t, s_ = read_crop(clean[max(0, y0 - 8):y1 + 8, max(0, x0 - 8):x1 + 8])
-        joined = ''.join(norm_text(l['text']) for l in r['ls'])
+        pieces = [norm_text(l['text']) for l in r['ls']]
+        nt = norm_text(t)
+        if re.search(r'[぀-ヿ]', nt) and not re.search(r'[A-Za-z]', nt):
+            # mảnh chỉ là MỘT chữ Latin lẻ giữa chữ Nhật = chữ kana đọc nhầm khi đọc từng mảnh nhỏ
+            # (し -> "L"); lần đọc cả hàng đọc đúng し thì không bắt nó phải chứa "L"
+            pieces = [p for p in pieces if not re.fullmatch(r'[A-Za-z]', p)]
+        joined = ''.join(pieces)
         it = iter(norm_text(t))
         if s_ >= 0.9 and all(c in it for c in joined):
             log.append(('đọc lại cả hàng sau khi ghép mảnh:', ' | '.join(l['text'] for l in r['ls']), '->', t.strip(), round(s_, 3)))
