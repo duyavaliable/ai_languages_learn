@@ -2,7 +2,6 @@ import User from './User.js';
 import Language from './Language.js';
 import Exercise from './Exercise.js';
 import Vocabulary from './Vocabulary.js';
-import SpeakingPassage from './SpeakingPassage.js';
 import SpeakingAttempt from './SpeakingAttempt.js';
 
 /**
@@ -35,18 +34,15 @@ Language.hasMany(Exercise, { foreignKey: 'language_id', as: 'exercises' });
 Vocabulary.belongsTo(Language, { foreignKey: 'language_id', as: 'language' });
 Language.hasMany(Vocabulary, { foreignKey: 'language_id', as: 'vocabularyItems' });
 
-// SpeakingPassage - Language. Bài đọc cho phần chấm phát âm; bảng riêng vì
-// `exercises` không có chỗ nào là "câu người học phải đọc to".
-SpeakingPassage.belongsTo(Language, { foreignKey: 'language_id', as: 'language' });
-Language.hasMany(SpeakingPassage, { foreignKey: 'language_id', as: 'speakingPassages' });
+// Bài Nói lưu ở `exercises` (skill_type 'speaking'). Bảng `speaking_passages` cũ
+// đã gộp vào `exercises` và đã xoá (16/11/2026).
 
-// SpeakingAttempt — MỘT LẦN ĐỌC TO ĐÃ CHẤM. Bảng mới 21/10/2026: trước đó sản
-// phẩm không lưu kết quả chấm phát âm ở đâu cả. Gắn vào NGƯỜI và NGÔN NGỮ,
-// không gắn vào `speaking_passages`, vì tư liệu đọc giờ nằm trong `exercises`
-// (xem scripts/migrateSpeakingToExercises.mjs).
+// SpeakingAttempt — MỘT LẦN ĐỌC BÀI NÓI ĐÃ CHẤM. Bảng mới 21/10/2026: trước đó sản
+// phẩm không lưu kết quả chấm phát âm ở đâu cả. Gắn vào NGƯỜI, NGÔN NGỮ và BÀI
+// (`exercise_id` -> `exercises`).
 SpeakingAttempt.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 User.hasMany(SpeakingAttempt, { foreignKey: 'user_id', as: 'speakingAttempts' });
 SpeakingAttempt.belongsTo(Language, { foreignKey: 'language_id', as: 'language' });
 SpeakingAttempt.belongsTo(Exercise, { foreignKey: 'exercise_id', as: 'exercise' });
 
-export { User, Language, Exercise, Vocabulary, SpeakingPassage, SpeakingAttempt };
+export { User, Language, Exercise, Vocabulary, SpeakingAttempt };

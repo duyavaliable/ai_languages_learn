@@ -1,7 +1,7 @@
 import { SpeakingAttempt } from '../models/index.js';
 
 /**
- * Lưu và tra lại các lần đọc to đã được chấm.
+ * Lưu và tra lại các lần đọc bài Nói đã được chấm.
  *
  *   POST /api/speaking-attempts              lưu một lần chấm
  *   GET  /api/speaking-attempts              các lần của CHÍNH người đang đăng nhập

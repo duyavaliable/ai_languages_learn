@@ -1,5 +1,5 @@
 import express from 'express';
-import { getExercises, getExerciseById, updateExerciseContent, deleteExercise, previewExerciseFile, createExercisesFromParts, replaceExerciseAudio, restoreExercise, previewDocxExam, createDocxExam, startScanExam, getScanExamStatus, cancelScanExam, createScanExam, attachScanKey } from '../controllers/exerciseController.js';
+import { getExercises, getExerciseById, updateExerciseContent, deleteExercise, previewExerciseFile, createExercisesFromParts, replaceExerciseAudio, restoreExercise, previewDocxExam, createDocxExam, startScanExam, getScanExamStatus, cancelScanExam, createScanExam, attachScanKey, createSpeakingExercise } from '../controllers/exerciseController.js';
 import { protect, authorize } from '../middleware/auth.js';
 import uploadAudio, { uploadVocabulary } from '../middleware/upload.js';
 
@@ -27,6 +27,8 @@ router.delete('/scan/:id', protect, authorize('admin'), cancelScanExam);
 router.post('/scan-key/:id', protect, authorize('admin'), uploadVocabulary.single('keyFile'), attachScanKey);
 // file nghe: MỘT file cho cả đề, hoặc nhiều file (mỗi câu / mỗi mục một file) — trường `audioFiles`
 router.post('/scan-create', protect, authorize('admin'), uploadAudio.array('audioFiles', 300), createScanExam);
+// Bài Nói (bài đọc): giáo viên nhập từng dòng, lưu vào `exercises` (skill_type 'speaking').
+router.post('/speaking-create', protect, authorize('admin'), createSpeakingExercise);
 router.post('/create-from-parts', protect, authorize('admin'), uploadAudio.single('audioFile'), createExercisesFromParts);
 
 export default router;

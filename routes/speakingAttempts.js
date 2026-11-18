@@ -7,7 +7,7 @@ import {
 } from '../controllers/speakingAttemptController.js';
 
 /**
- * Lịch sử các lần đọc to đã được chấm.
+ * Lịch sử các lần đọc bài Nói đã được chấm.
  *
  *   POST /api/speaking-attempts            lưu một lần chấm
  *   GET  /api/speaking-attempts            các lần của chính mình

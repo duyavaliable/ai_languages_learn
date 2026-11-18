@@ -28,7 +28,7 @@ const Vocabulary = sequelize.define('Vocabulary', {
   example_translation: { type: DataTypes.TEXT, allowNull: true },
   part_of_speech: { type: DataTypes.STRING(50), allowNull: true },
   audio_url: { type: DataTypes.STRING(225), allowNull: true },
-  // Xoa mem, giong `exercises` va `speaking_passages`.
+  // Xoa mem, giong `exercises`.
   is_deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }
 }, {
   tableName: 'vocabulary',

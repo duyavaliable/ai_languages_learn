@@ -15,7 +15,6 @@ import userRoutes from './routes/users.js';
 import languageRoutes from './routes/languages.js';
 import exerciseRoutes from './routes/exercises.js';
 import pronunciationRoutes from './routes/pronunciation.js';
-import speakingPassageRoutes from './routes/speakingPassages.js';
 import speakingAttemptRoutes from './routes/speakingAttempts.js';
 import furiganaRoutes from './routes/furigana.js';
 import writingRoutes from './routes/writing.js';
@@ -81,14 +80,13 @@ app.use('/api/users', userRoutes);
 app.use('/api/languages', languageRoutes);
 app.use('/api/exercises', exerciseRoutes);
 // Đã gỡ /api/ai (Gemini) và /api/speech (chấm "nói tự do" cũ): hệ thống không dùng AI bên ngoài,
-// bài nói chỉ có dạng đọc to theo văn bản cho trước, chấm bằng model của đồ án qua /api/pronunciation.
+// bài Nói là bài đọc theo văn bản cho trước, chấm bằng model của đồ án qua /api/pronunciation.
 // Chấm phát âm bằng model của đồ án. Dịch vụ Python riêng ở cổng 8000 —
 // xem services/pronunciationService.js. Node không chạy được PyTorch nên
 // không có cách nhúng model vào đây.
 app.use('/api/pronunciation', pronunciationRoutes);
-// Bai doc cho phan cham phat am. Bang rieng vi model can biet TRUOC cau
-// nguoi hoc phai doc, con `exercises` chua de VSTEP.
-app.use('/api/speaking-passages', speakingPassageRoutes);
+// Bài Nói lưu ở `exercises` (skill_type 'speaking'), tạo qua POST /api/exercises/speaking-create.
+// Bảng `speaking_passages` cũ đã gộp vào `exercises` rồi xoá; API /api/speaking-passages đã gỡ.
 // Lich su cham phat am. Bang `speaking_attempts`, moi 21/10/2026 -- truoc do
 // cham xong la mat, ca hai ngon ngu. Luu SO DO THO chu khong chi luu diem, vi
 // moc va san con co the doi. Xem models/SpeakingAttempt.js.

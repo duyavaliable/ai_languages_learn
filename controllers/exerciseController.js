@@ -717,3 +717,99 @@ export const createDocxExam = async (req, res) => {
     return res.status(500).json({ message: error.message });
   }
 };
+
+/* ================= BÀI NÓI (bài đọc) =================
+ *
+ * Bài Nói lưu ở bảng `exercises` — cùng chỗ với mọi bài khác, và là chỗ DUY NHẤT
+ * trang của học viên đọc (trang chủ: GET /exercises, trang luyện nói:
+ * GET /exercises/:id). Bảng `speaking_passages` cũ đã gộp vào đây và đã xoá
+ * (xem config/ensureSchema.js).
+ *
+ *   skill_type = 'speaking', speaking_mode = 'read_aloud' (giá trị có sẵn trong CSDL, giữ để khớp các bài cũ)
+ *   questions_json = [{ index, speaker, text }]  — mỗi dòng là MỘT lần đọc, chấm riêng
+ *
+ * `has_prosody_ref` không nhận từ client: server hỏi dịch vụ chấm xem MỌI câu
+ * có mốc người bản ngữ không (chỉ tiếng Nhật có cơ chế này).
+ */
+const PRONUNCIATION_URL = (process.env.PRONUNCIATION_SERVICE_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+
+/** Tách nội dung giáo viên nhập thành từng dòng đọc. Hội thoại: "Vai: nội dung". */
+function parseSpeakingLines(raw, kind) {
+  return String(raw || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l, index) => {
+      const m = kind === 'dialogue' ? l.match(/^([^:：]{1,20})[:：]\s*(.+)$/) : null;
+      return m ? { index, speaker: m[1].trim(), text: m[2].trim() } : { index, speaker: null, text: l };
+    });
+}
+
+async function verifyProsodyRef(lines) {
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 8000);
+    const r = await fetch(`${PRONUNCIATION_URL}/ja/sentences`, { signal: ac.signal });
+    clearTimeout(timer);
+    if (!r.ok) return { ok: false, has: false, reason: `HTTP ${r.status}` };
+    const set = new Set((await r.json()).sentences || []);
+    return { ok: true, has: lines.length > 0 && lines.every((l) => set.has(l.text)) };
+  } catch (e) {
+    return { ok: false, has: false, reason: e.message };
+  }
+}
+
+export const createSpeakingExercise = async (req, res) => {
+  try {
+    const title = String(req.body?.title || '').trim().slice(0, 225);
+    const kind = req.body?.kind === 'dialogue' ? 'dialogue' : 'passage';
+    const lines = parseSpeakingLines(req.body?.content, kind);
+    const languageId = Number(req.body?.language_id);
+    if (!title) return res.status(400).json({ message: 'Thiếu tên bài' });
+    if (!languageId) return res.status(400).json({ message: 'Thiếu ngôn ngữ' });
+    if (!lines.length) {
+      return res.status(400).json({ message: 'Cần ít nhất một dòng. Mỗi dòng là MỘT lần đọc; hội thoại thì viết "Vai: nội dung".' });
+    }
+    const lang = await Language.findByPk(languageId);
+    if (!lang) return res.status(400).json({ message: 'Ngôn ngữ không tồn tại' });
+
+    let hasRef = false;
+    let prosodyNote = null;
+    if (lang.code === 'ja') {
+      const v = await verifyProsodyRef(lines);
+      hasRef = v.has;
+      prosodyNote = v.ok
+        ? (v.has ? 'Mọi dòng đều có mốc người bản ngữ — chấm được cả tiêu chí Ngữ điệu.'
+          : 'Có dòng chưa có mốc người bản ngữ — tiêu chí Ngữ điệu sẽ không được chấm.')
+        : `Không hỏi được dịch vụ chấm (${v.reason}); tạm coi là chưa có mốc Ngữ điệu.`;
+    }
+
+    let courseId = Number(req.body?.course_id);
+    if (!Number.isFinite(courseId) || courseId <= 0) {
+      const first = await Exercise.findOne({ attributes: ['course_id'], where: { is_deleted: false }, order: [['id', 'ASC']] });
+      courseId = Number(first?.course_id) > 0 ? Number(first.course_id) : 1;
+    }
+
+    const row = await Exercise.create({
+      course_id: courseId,
+      language_id: languageId,
+      title,
+      skill_type: 'speaking',
+      speaking_mode: 'read_aloud',
+      reading_passage: null,
+      task_prompt: 'Đọc từng câu dưới đây. Model sẽ chấm phát âm của bạn.',
+      sample_answer: null,
+      audio_url: null,
+      questions_json: JSON.stringify(lines),
+      time_limit_sec: 300,
+      source: String(req.body?.source || '').trim().slice(0, 500) || null,
+      license: String(req.body?.license || '').trim().slice(0, 200) || null,
+      has_prosody_ref: hasRef,
+      is_deleted: false
+    });
+    return res.status(201).json({ exerciseId: row.id, title, lines: lines.length, prosody_note: prosodyNote });
+  } catch (error) {
+    console.error('[createSpeakingExercise] Error:', error);
+    return res.status(500).json({ message: error.message });
+  }
+};

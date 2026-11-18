@@ -65,19 +65,17 @@ export const ensureDatabaseSchema = async () => {
       allowNull: true
     });
 
-    // --- Bai doc to cho phan cham phat am, gop tu `speaking_passages` ---
+    // --- Bai Noi (bai doc) cho phan cham phat am: luu o `exercises` ---
     //
-    // Truoc day bai doc to nam o bang rieng. Ly do chinh khi tach la "model
-    // train tren cau toi da 10 tu nen khong dung duoc van ban that" -- do lai
-    // thi lý do do SAI: muc 9 cua SO_LIEU_HIEN_HANH.md do cau 13-30 tu cho
-    // 0/77 co oan, va `PassageSession` luon dua MOT CAU cho model. Gop lai de
-    // giao dien chi phai doc mot bang.
+    // Truoc day bai doc cua ky nang Noi nam o bang rieng `speaking_passages`.
+    // Ly do khi tach ("model train tren cau toi da 10 tu") do lai la SAI: muc 9
+    // cua SO_LIEU_HIEN_HANH.md do cau 13-30 tu cho 0/77 co oan, va
+    // `PassageSession` luon dua MOT CAU cho model. Da gop het vao `exercises`
+    // va XOA bang `speaking_passages` (16/11/2026; ban sao luu o backup/).
     //
-    // `speaking_mode` phan biet HAI hoat dong khac nhau cung mang
-    // skill_type='speaking':
-    //    'read_aloud' -> doc to dung van ban cho san, model cham phat am
-    //    'free'       -> de noi tu do VSTEP, khong co van ban dich
-    // De NULL nghia la 'free' (cac dong VSTEP cu).
+    // `speaking_mode` = 'read_aloud': gia tri dinh danh cua bai Noi (bai doc theo
+    // van ban cho san, model cham phat am). NULL chi con o vai dong VSTEP cu da
+    // xoa mem (dang "noi tu do" da go khoi he thong).
     await ensureColumn('exercises', 'speaking_mode', {
       type: DataTypes.STRING(16),
       allowNull: true
@@ -107,30 +105,10 @@ export const ensureDatabaseSchema = async () => {
     });
   }
 
-  // Bai doc cho phan cham phat am. Tach khoi `exercises` vi model cham phat am
-  // can biet TRUOC cau nguoi hoc phai doc, con `exercises` chua de VSTEP.
-  if (!tableNames.includes('speaking_passages')) {
-    await queryInterface.createTable('speaking_passages', {
-      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-      language_id: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false },
-      kind: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'passage' },
-      title: { type: DataTypes.STRING(225), allowNull: false },
-      topic: { type: DataTypes.STRING(225), allowNull: true },
-      level: { type: DataTypes.STRING(16), allowNull: true },
-      lines_json: { type: DataTypes.TEXT('long'), allowNull: false },
-      source: { type: DataTypes.STRING(500), allowNull: true },
-      license: { type: DataTypes.STRING(200), allowNull: true },
-      attribution: { type: DataTypes.TEXT, allowNull: true },
-      has_prosody_ref: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
-      sort_order: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
-      created_by: { type: DataTypes.INTEGER, allowNull: true },
-      is_deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
-      created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
-      updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW }
-    });
-  }
+  // Bang `speaking_passages` da xoa (16/11/2026): bai Noi luu o `exercises`
+  // (skill_type 'speaking'). KHONG tao lai bang nay.
 
-  // MOT LAN DOC TO DA DUOC CHAM. Bang moi 21/10/2026.
+  // MOT LAN DOC BAI NOI DA DUOC CHAM. Bang moi 21/10/2026.
   //
   // Truoc do san pham KHONG luu ket qua cham phat am o dau ca. Trong MySQL co
   // `exercise_progress` va `flashcard_progress` nhung KHONG dong code nao

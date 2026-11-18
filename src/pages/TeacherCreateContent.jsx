@@ -27,17 +27,15 @@ const JAPANESE_PART_OPTIONS = ['N5', 'N4', 'N3', 'N2', 'N1'];
  * rồi tách thành câu hỏi. **Giữ nguyên, không đụng vào.**
  *
  * Nói: model chấm phát âm so bản ghi với một VĂN BẢN ĐÍCH biết trước, nên
- * không có "đề" để quét — chỉ có câu người học phải đọc. Giáo viên nhập thẳng
- * từng dòng, lưu vào bảng `speaking_passages`. Mỗi dòng là MỘT lần đọc, chấm
- * riêng từng dòng.
+ * không có "đề" để quét — chỉ có bài đọc. Giáo viên nhập thẳng từng dòng, lưu
+ * vào bảng `exercises` (skill_type 'speaking') như mọi bài khác — đó là chỗ
+ * trang học viên đọc. Mỗi dòng là MỘT lần đọc, chấm riêng từng dòng.
  */
 const SPEAKING_SKILL = 'speaking';
 
 const defaultSpeakingPassage = {
   kind: 'passage',
   title: '',
-  topic: '',
-  level: '',
   content: '',
   source: '',
   license: ''
@@ -315,7 +313,7 @@ function TeacherCreateContent({ embedded = false, onCreated } = {}) {
   };
 
   /**
-   * Lưu một bài đọc cho kỹ năng NÓI vào bảng `speaking_passages`.
+   * Lưu một bài đọc cho kỹ năng NÓI vào bảng `exercises` (skill_type 'speaking').
    *
    * Không đi qua `/exercises/create-from-parts` vì không có file đề để quét —
    * văn bản đích do giáo viên nhập thẳng.
@@ -345,24 +343,24 @@ function TeacherCreateContent({ embedded = false, onCreated } = {}) {
 
     setSpeakingSaving(true);
     try {
-      const res = await api.post('/speaking-passages', {
+      const res = await api.post('/exercises/speaking-create', {
         language_id: Number(exerciseForm.language_id),
         kind: speakingForm.kind,
         title,
-        topic: speakingForm.topic || null,
-        level: speakingForm.level || null,
         content,                       // server tự tách dòng, hiểu "Vai: nội dung"
         source: speakingForm.source || null,
         license: speakingForm.license || null
       });
       const d = res.data || {};
-      const nLines = Array.isArray(d.lines) ? d.lines.length : 0;
+      const nLines = Number(d.lines) || 0;
       const note = d.prosody_note ? ` ${d.prosody_note}` : '';
       setSpeakingMsg({
         type: 'success',
         text: `Đã lưu "${title}" với ${nLines} dòng.${note}`
       });
       setSpeakingForm(defaultSpeakingPassage);
+      // Nhúng trong Quản lý nội dung: báo để danh sách bài tải lại (bài Nói giờ là một exercise).
+      if (onCreated && d.exerciseId) onCreated([{ exerciseId: d.exerciseId, exerciseTitle: title }]);
     } catch (err) {
       setSpeakingMsg({
         type: 'error',
@@ -1568,7 +1566,7 @@ Không khôi phục lại được.`)) return;
             {/* ============ KỸ NĂNG NÓI — đường riêng ============
               * Model chấm phát âm so bản ghi với VĂN BẢN ĐÍCH biết trước, nên
               * không quét file đề. Giáo viên nhập thẳng từng dòng.
-              * Lưu vào `speaking_passages`, KHÔNG vào `exercises`. */}
+              * Lưu vào `exercises` (skill_type 'speaking') — cùng chỗ trang học viên đọc. */}
             {exerciseForm.skill === SPEAKING_SKILL && (
               <form onSubmit={submitSpeakingPassage} style={{ marginTop: '16px', paddingTop: '16px', borderTop: '2px solid #e2e8f0' }}>
                 <h4 style={styles.subTitle}>Bài đọc cho kỹ năng Nói</h4>
@@ -1592,23 +1590,6 @@ Không khôi phục lại được.`)) return;
                       value={speakingForm.title}
                       onChange={(e) => setSpeakingForm((p) => ({ ...p, title: e.target.value }))}
                       placeholder="Ví dụ: Hội thoại ở cửa hàng"
-                    />
-                  </div>
-                  <div>
-                    <label style={styles.label}>Chủ đề (tuỳ chọn)</label>
-                    <input
-                      style={styles.input}
-                      value={speakingForm.topic}
-                      onChange={(e) => setSpeakingForm((p) => ({ ...p, topic: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label style={styles.label}>Trình độ (tuỳ chọn)</label>
-                    <input
-                      style={styles.input}
-                      value={speakingForm.level}
-                      onChange={(e) => setSpeakingForm((p) => ({ ...p, level: e.target.value }))}
-                      placeholder={isJapaneseExercise ? 'N5, N4...' : 'A2, B1...'}
                     />
                   </div>
                 </div>
